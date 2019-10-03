@@ -300,9 +300,9 @@ config HAS_IOMEM
 	select GENERIC_IO
 	default y
 
-config HAS_IOPORT_MAP
+config HAS_IOPORT
 	boolean
-	depends on HAS_IOMEM && !NO_IOPORT_MAP
+	depends on HAS_IOMEM && !NO_IOPORT
 	default y
 
 config HAS_DMA

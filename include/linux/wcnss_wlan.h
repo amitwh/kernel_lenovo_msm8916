@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -29,7 +29,6 @@ enum wcnss_hw_type {
 struct wcnss_wlan_config {
 	int	use_48mhz_xo;
 	int	is_pronto_vt;
-	int	is_pronto_v3;
 	void __iomem	*msm_wcnss_base;
 };
 
@@ -52,7 +51,6 @@ enum {
 #define HAVE_WCNSS_SUSPEND_RESUME_NOTIFY 1
 #define HAVE_WCNSS_RESET_INTR 1
 #define HAVE_WCNSS_CAL_DOWNLOAD 1
-#define HAVE_CBC_DONE 1
 #define HAVE_WCNSS_RX_BUFF_COUNT 1
 #define WLAN_MAC_ADDR_SIZE (6)
 #define WLAN_RF_REG_ADDR_START_OFFSET	0x3
@@ -67,11 +65,8 @@ enum {
 #define WLAN_RF_DATA0_SHIFT		0
 #define WLAN_RF_DATA1_SHIFT		1
 #define WLAN_RF_DATA2_SHIFT		2
-#define PRONTO_PMU_OFFSET       0x1004
-#define WCNSS_PMU_CFG_GC_BUS_MUX_SEL_TOP   BIT(5)
 
 struct device *wcnss_wlan_get_device(void);
-void wcnss_get_monotonic_boottime(struct timespec *ts);
 struct resource *wcnss_wlan_get_memory_map(struct device *dev);
 int wcnss_wlan_get_dxe_tx_irq(struct device *dev);
 int wcnss_wlan_get_dxe_rx_irq(struct device *dev);
@@ -104,9 +99,7 @@ void wcnss_suspend_notify(void);
 void wcnss_resume_notify(void);
 void wcnss_riva_log_debug_regs(void);
 void wcnss_pronto_log_debug_regs(void);
-int wcnss_is_hw_pronto_ver3(void);
 int wcnss_device_ready(void);
-bool wcnss_cbc_complete(void);
 int wcnss_device_is_shutdown(void);
 void wcnss_riva_dump_pmic_regs(void);
 int wcnss_xo_auto_detect_enabled(void);

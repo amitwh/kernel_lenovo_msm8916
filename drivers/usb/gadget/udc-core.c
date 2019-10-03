@@ -27,7 +27,6 @@
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
-#include <linux/usb/composite.h>
 
 /**
  * struct usb_udc - describes one usb device controller
@@ -69,7 +68,7 @@ int usb_gadget_map_request(struct usb_gadget *gadget,
 		}
 
 		req->num_mapped_sgs = mapped;
-	} else if (!req->dma_pre_mapped) {
+	} else {
 		req->dma = dma_map_single(&gadget->dev, req->buf, req->length,
 				is_in ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 
@@ -94,16 +93,9 @@ void usb_gadget_unmap_request(struct usb_gadget *gadget,
 				is_in ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 
 		req->num_mapped_sgs = 0;
-	} else if (!req->dma_pre_mapped && req->dma != DMA_ERROR_CODE) {
-		/*
-		 * If the DMA address has not been mapped by a higher layer,
-		 * then unmap it here. Otherwise, the DMA address will be
-		 * unmapped by the upper layer (where the request was queued).
-		 */
+	} else {
 		dma_unmap_single(&gadget->dev, req->dma, req->length,
-			is_in ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
-
-		req->dma = DMA_ERROR_CODE;
+				is_in ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 	}
 }
 EXPORT_SYMBOL_GPL(usb_gadget_unmap_request);
@@ -437,37 +429,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_gadget_unregister_driver);
-
-int usb_func_ep_queue(struct usb_function *func, struct usb_ep *ep,
-			       struct usb_request *req, gfp_t gfp_flags)
-{
-	int ret;
-	struct usb_gadget *gadget;
-
-	if (!func || !ep || !req) {
-		pr_err("Invalid argument. func=%p, ep=%p, req=%p\n",
-			func, ep, req);
-		return -EINVAL;
-	}
-
-	pr_debug("Function %s queueing new data into ep %u\n",
-		func->name ? func->name : "", ep->address);
-
-	gadget = func->config->cdev->gadget;
-	if ((gadget->speed == USB_SPEED_SUPER) && func->func_is_suspended) {
-		ret = usb_func_wakeup(func);
-		if (ret) {
-			pr_err("Failed to send function wake up notification. func name:%s, ep:%u\n",
-				func->name ? func->name : "",
-				ep->address);
-			return ret;
-		}
-	}
-
-	ret = usb_ep_queue(ep, req, gfp_flags);
-	return ret;
-}
-
 
 /* ------------------------------------------------------------------------- */
 

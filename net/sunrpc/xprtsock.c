@@ -502,7 +502,6 @@ static int xs_nospace(struct rpc_task *task)
 	struct rpc_rqst *req = task->tk_rqstp;
 	struct rpc_xprt *xprt = req->rq_xprt;
 	struct sock_xprt *transport = container_of(xprt, struct sock_xprt, xprt);
-	struct sock *sk = transport->inet;
 	int ret = -EAGAIN;
 
 	dprintk("RPC: %5u xmit incomplete (%u left of %u)\n",
@@ -520,7 +519,7 @@ static int xs_nospace(struct rpc_task *task)
 			 * window size
 			 */
 			set_bit(SOCK_NOSPACE, &transport->sock->flags);
-			sk->sk_write_pending++;
+			transport->inet->sk_write_pending++;
 			/* ...and wait for more buffer space */
 			xprt_wait_for_buffer_space(task, xs_nospace_callback);
 		}
@@ -530,9 +529,6 @@ static int xs_nospace(struct rpc_task *task)
 	}
 
 	spin_unlock_bh(&xprt->transport_lock);
-
-	/* Race breaker in case memory is freed before above code is called */
-	sk->sk_write_space(sk);
 	return ret;
 }
 
@@ -851,11 +847,11 @@ static void xs_close(struct rpc_xprt *xprt)
 	xs_reset_transport(transport);
 	xprt->reestablish_timeout = 0;
 
-	smp_mb__before_atomic();
+	smp_mb__before_clear_bit();
 	clear_bit(XPRT_CONNECTION_ABORT, &xprt->state);
 	clear_bit(XPRT_CLOSE_WAIT, &xprt->state);
 	clear_bit(XPRT_CLOSING, &xprt->state);
-	smp_mb__after_atomic();
+	smp_mb__after_clear_bit();
 	xprt_disconnect_done(xprt);
 }
 
@@ -1476,12 +1472,12 @@ static void xs_tcp_cancel_linger_timeout(struct rpc_xprt *xprt)
 
 static void xs_sock_reset_connection_flags(struct rpc_xprt *xprt)
 {
-	smp_mb__before_atomic();
+	smp_mb__before_clear_bit();
 	clear_bit(XPRT_CONNECTION_ABORT, &xprt->state);
 	clear_bit(XPRT_CONNECTION_CLOSE, &xprt->state);
 	clear_bit(XPRT_CLOSE_WAIT, &xprt->state);
 	clear_bit(XPRT_CLOSING, &xprt->state);
-	smp_mb__after_atomic();
+	smp_mb__after_clear_bit();
 }
 
 static void xs_sock_mark_closed(struct rpc_xprt *xprt)
@@ -1533,10 +1529,10 @@ static void xs_tcp_state_change(struct sock *sk)
 		xprt->connect_cookie++;
 		xprt->reestablish_timeout = 0;
 		set_bit(XPRT_CLOSING, &xprt->state);
-		smp_mb__before_atomic();
+		smp_mb__before_clear_bit();
 		clear_bit(XPRT_CONNECTED, &xprt->state);
 		clear_bit(XPRT_CLOSE_WAIT, &xprt->state);
-		smp_mb__after_atomic();
+		smp_mb__after_clear_bit();
 		xs_tcp_schedule_linger_timeout(xprt, xs_tcp_fin_timeout);
 		break;
 	case TCP_CLOSE_WAIT:
@@ -1555,9 +1551,9 @@ static void xs_tcp_state_change(struct sock *sk)
 	case TCP_LAST_ACK:
 		set_bit(XPRT_CLOSING, &xprt->state);
 		xs_tcp_schedule_linger_timeout(xprt, xs_tcp_fin_timeout);
-		smp_mb__before_atomic();
+		smp_mb__before_clear_bit();
 		clear_bit(XPRT_CONNECTED, &xprt->state);
-		smp_mb__after_atomic();
+		smp_mb__after_clear_bit();
 		break;
 	case TCP_CLOSE:
 		xs_tcp_cancel_linger_timeout(xprt);
