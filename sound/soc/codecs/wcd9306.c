@@ -194,6 +194,7 @@ static const DECLARE_TLV_DB_SCALE(digital_gain, 0, 1, 0);
 static const DECLARE_TLV_DB_SCALE(line_gain, 0, 7, 1);
 static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
 static struct snd_soc_dai_driver tapan_dai[];
+static const DECLARE_TLV_DB_SCALE(aux_pga_gain, 0, 2, 0);
 
 /* Codec supports 2 IIR filters */
 enum {
@@ -3799,7 +3800,7 @@ static int tapan_get_channel_map(struct snd_soc_dai *dai,
 	case AIF2_PB:
 	case AIF3_PB:
 		if (!rx_slot || !rx_num) {
-			pr_err("%s: Invalid rx_slot %pK or rx_num %pK\n",
+			pr_err("%s: Invalid rx_slot %p or rx_num %p\n",
 				 __func__, rx_slot, rx_num);
 			return -EINVAL;
 		}
@@ -3816,7 +3817,7 @@ static int tapan_get_channel_map(struct snd_soc_dai *dai,
 	case AIF2_CAP:
 	case AIF3_CAP:
 		if (!tx_slot || !tx_num) {
-			pr_err("%s: Invalid tx_slot %pK or tx_num %pK\n",
+			pr_err("%s: Invalid tx_slot %p or tx_num %p\n",
 				 __func__, tx_slot, tx_num);
 			return -EINVAL;
 		}

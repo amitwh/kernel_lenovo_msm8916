@@ -45,7 +45,7 @@ struct key;
 #define KEY_POS_LINK	0x10000000	/* possessor can create a link to a key/keyring */
 #define KEY_POS_SETATTR	0x20000000	/* possessor can set key attributes */
 #define KEY_POS_ALL	0x3f000000
-#define	KEY_NEED_WRITE	0x04
+
 #define KEY_USR_VIEW	0x00010000	/* user permissions... */
 #define KEY_USR_READ	0x00020000
 #define KEY_USR_WRITE	0x00040000
@@ -162,7 +162,6 @@ struct key {
 #define KEY_FLAG_NEGATIVE	5	/* set if key is negative */
 #define KEY_FLAG_ROOT_CAN_CLEAR	6	/* set if key can be cleared by root without permission */
 #define KEY_FLAG_INVALIDATED	7	/* set if key has been invalidated */
-#define KEY_FLAG_UID_KEYRING	11	/* set if key is a user or user session keyring */
 
 	/* the description string
 	 * - this is used to match a key against search criteria
@@ -204,7 +203,6 @@ extern struct key *key_alloc(struct key_type *type,
 #define KEY_ALLOC_IN_QUOTA	0x0000	/* add to quota, reject if would overrun */
 #define KEY_ALLOC_QUOTA_OVERRUN	0x0001	/* add to quota, permit even if overrun */
 #define KEY_ALLOC_NOT_IN_QUOTA	0x0002	/* not in quota */
-#define KEY_ALLOC_UID_KEYRING	0x0010	/* allocating a user or user session keyring */
 
 extern void key_revoke(struct key *key);
 extern void key_invalidate(struct key *key);

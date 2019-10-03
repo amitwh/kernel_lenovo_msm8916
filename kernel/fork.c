@@ -71,7 +71,6 @@
 #include <linux/signalfd.h>
 #include <linux/uprobes.h>
 #include <linux/aio.h>
-#include <linux/cpufreq.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -211,9 +210,6 @@ static void account_kernel_stack(struct thread_info *ti, int account)
 
 void free_task(struct task_struct *tsk)
 {
-#ifdef CONFIG_CPU_FREQ_STAT
-	cpufreq_task_stats_free(tsk);
-#endif
 	account_kernel_stack(tsk->stack, -1);
 	arch_release_thread_info(tsk->stack);
 	free_thread_info(tsk->stack);
@@ -310,15 +306,14 @@ int __attribute__((weak)) arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
-static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+static struct task_struct *dup_task_struct(struct task_struct *orig)
 {
 	struct task_struct *tsk;
 	struct thread_info *ti;
 	unsigned long *stackend;
+	int node = tsk_fork_get_node(orig);
 	int err;
 
-	if (node == NUMA_NO_NODE)
-		node = tsk_fork_get_node(orig);
 	tsk = alloc_task_struct_node(node);
 	if (!tsk)
 		return NULL;
@@ -331,18 +326,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
 	if (err)
 		goto free_ti;
 
-	tsk->flags &= ~PF_SU;
-
 	tsk->stack = ti;
-#ifdef CONFIG_SECCOMP
-	/*
-	 * We must handle setting up seccomp filters once we're under
-	 * the sighand lock in case orig has changed between now and
-	 * then. Until then, filter must be NULL to avoid messing up
-	 * the usage counts on the error path calling free_task.
-	 */
-	tsk->seccomp.filter = NULL;
-#endif
 
 	setup_thread_stack(tsk, orig);
 	clear_user_return_notifier(tsk);
@@ -572,7 +556,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	spin_lock_init(&mm->page_table_lock);
 	mm_init_aio(mm);
 	mm_init_owner(mm, p);
-	init_tlb_flush_pending(mm);
+	clear_tlb_flush_pending(mm);
 
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
@@ -728,7 +712,8 @@ struct mm_struct *mm_access(struct task_struct *task, unsigned int mode)
 
 	mm = get_task_mm(task);
 	if (mm && mm != current->mm &&
-			!ptrace_may_access(task, mode)) {
+			!ptrace_may_access(task, mode) &&
+			!capable(CAP_SYS_RESOURCE)) {
 		mmput(mm);
 		mm = ERR_PTR(-EACCES);
 	}
@@ -806,12 +791,14 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 	deactivate_mm(tsk, mm);
 
 	/*
-	 * Signal userspace if we're not exiting with a core dump
-	 * because we want to leave the value intact for debugging
-	 * purposes.
+	 * If we're exiting normally, clear a user-space tid field if
+	 * requested.  We leave this alone when dying by signal, to leave
+	 * the value intact in a core dump, and to save the unnecessary
+	 * trouble, say, a killed vfork parent shouldn't touch this mm.
+	 * Userland only wants this done for a sys_exit.
 	 */
 	if (tsk->clear_child_tid) {
-		if (!(tsk->signal->flags & SIGNAL_GROUP_COREDUMP) &&
+		if (!(tsk->flags & PF_SIGNALED) &&
 		    atomic_read(&mm->mm_users) > 1) {
 			/*
 			 * We don't check the error code - if userspace has
@@ -1074,11 +1061,6 @@ static int copy_signal(unsigned long clone_flags, struct task_struct *tsk)
 	sig->nr_threads = 1;
 	atomic_set(&sig->live, 1);
 	atomic_set(&sig->sigcnt, 1);
-
-	/* list_add(thread_node, thread_head) without INIT_LIST_HEAD() */
-	sig->thread_head = (struct list_head)LIST_HEAD_INIT(tsk->thread_node);
-	tsk->thread_node = (struct list_head)LIST_HEAD_INIT(sig->thread_head);
-
 	init_waitqueue_head(&sig->wait_chldexit);
 	sig->curr_target = tsk;
 	init_sigpending(&sig->shared_pending);
@@ -1118,39 +1100,6 @@ static void copy_flags(unsigned long clone_flags, struct task_struct *p)
 	new_flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER);
 	new_flags |= PF_FORKNOEXEC;
 	p->flags = new_flags;
-}
-
-static void copy_seccomp(struct task_struct *p)
-{
-#ifdef CONFIG_SECCOMP
-	/*
-	 * Must be called with sighand->lock held, which is common to
-	 * all threads in the group. Holding cred_guard_mutex is not
-	 * needed because this new task is not yet running and cannot
-	 * be racing exec.
-	 */
-	assert_spin_locked(&current->sighand->siglock);
-
-	/* Ref-count the new filter user, and assign it. */
-	get_seccomp_filter(current);
-	p->seccomp = current->seccomp;
-
-	/*
-	 * Explicitly enable no_new_privs here in case it got set
-	 * between the task_struct being duplicated and holding the
-	 * sighand lock. The seccomp state and nnp must be in sync.
-	 */
-	if (task_no_new_privs(current))
-		task_set_no_new_privs(p);
-
-	/*
-	 * If the parent gained a seccomp mode after copying thread
-	 * flags and between before we held the sighand lock, we have
-	 * to manually enable the seccomp thread flag here.
-	 */
-	if (p->seccomp.mode != SECCOMP_MODE_DISABLED)
-		set_tsk_thread_flag(p, TIF_SECCOMP);
-#endif
 }
 
 SYSCALL_DEFINE1(set_tid_address, int __user *, tidptr)
@@ -1202,8 +1151,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 					unsigned long stack_size,
 					int __user *child_tidptr,
 					struct pid *pid,
-					int trace,
-					int node)
+					int trace)
 {
 	int retval;
 	struct task_struct *p;
@@ -1253,11 +1201,12 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
-	p = dup_task_struct(current, node);
+	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
 
 	ftrace_graph_init_task(p);
+	get_seccomp_filter(p);
 
 	rt_mutex_init_task(p);
 
@@ -1303,7 +1252,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	p->utime = p->stime = p->gtime = 0;
 	p->utimescaled = p->stimescaled = 0;
-	p->cpu_power = 0;
 #ifndef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
 	p->prev_cputime.utime = p->prev_cputime.stime = 0;
 #endif
@@ -1387,7 +1335,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto bad_fork_cleanup_policy;
 	retval = audit_alloc(p);
 	if (retval)
-		goto bad_fork_cleanup_perf;
+		goto bad_fork_cleanup_policy;
 	/* copy all the process information */
 	retval = copy_semundo(clone_flags, p);
 	if (retval)
@@ -1501,12 +1449,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	spin_lock(&current->sighand->siglock);
 
 	/*
-	 * Copy seccomp details explicitly here, in case they were changed
-	 * before holding sighand lock.
-	 */
-	copy_seccomp(p);
-
-	/*
 	 * Process group and session signals need to be delivered to just the
 	 * parent before the fork or both the parent and the child after the
 	 * fork. Restart if a signal comes in before we add the new process to
@@ -1520,6 +1462,14 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		write_unlock_irq(&tasklist_lock);
 		retval = -ERESTARTNOINTR;
 		goto bad_fork_free_pid;
+	}
+
+	if (clone_flags & CLONE_THREAD) {
+		current->signal->nr_threads++;
+		atomic_inc(&current->signal->live);
+		atomic_inc(&current->signal->sigcnt);
+		p->group_leader = current->group_leader;
+		list_add_tail_rcu(&p->thread_group, &p->group_leader->thread_group);
 	}
 
 	if (likely(p->pid)) {
@@ -1538,15 +1488,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 			list_add_tail(&p->sibling, &p->real_parent->children);
 			list_add_tail_rcu(&p->tasks, &init_task.tasks);
 			__this_cpu_inc(process_counts);
-		} else {
-			current->signal->nr_threads++;
-			atomic_inc(&current->signal->live);
-			atomic_inc(&current->signal->sigcnt);
-			p->group_leader = current->group_leader;
-			list_add_tail_rcu(&p->thread_group,
-					  &p->group_leader->thread_group);
-			list_add_tail_rcu(&p->thread_node,
-					  &p->signal->thread_head);
 		}
 		attach_pid(p, PIDTYPE_PID, pid);
 		nr_threads++;
@@ -1591,9 +1532,8 @@ bad_fork_cleanup_semundo:
 	exit_sem(p);
 bad_fork_cleanup_audit:
 	audit_free(p);
-bad_fork_cleanup_perf:
-	perf_event_free_task(p);
 bad_fork_cleanup_policy:
+	perf_event_free_task(p);
 #ifdef CONFIG_NUMA
 	mpol_put(p->mempolicy);
 bad_fork_cleanup_cgroup:
@@ -1625,8 +1565,7 @@ static inline void init_idle_pids(struct pid_link *links)
 struct task_struct * __cpuinit fork_idle(int cpu)
 {
 	struct task_struct *task;
-	task = copy_process(CLONE_VM, 0, 0, NULL, &init_struct_pid, 0,
-			    cpu_to_node(cpu));
+	task = copy_process(CLONE_VM, 0, 0, NULL, &init_struct_pid, 0);
 	if (!IS_ERR(task)) {
 		init_idle_pids(task->pids);
 		init_idle(task, cpu);
@@ -1679,7 +1618,7 @@ long do_fork(unsigned long clone_flags,
 	}
 
 	p = copy_process(clone_flags, stack_start, stack_size,
-			 child_tidptr, NULL, trace, NUMA_NO_NODE);
+			 child_tidptr, NULL, trace);
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1830,21 +1769,13 @@ static int check_unshare_flags(unsigned long unshare_flags)
 				CLONE_NEWUSER|CLONE_NEWPID))
 		return -EINVAL;
 	/*
-	 * Not implemented, but pretend it works if there is nothing
-	 * to unshare.  Note that unsharing the address space or the
-	 * signal handlers also need to unshare the signal queues (aka
-	 * CLONE_THREAD).
+	 * Not implemented, but pretend it works if there is nothing to
+	 * unshare. Note that unsharing CLONE_THREAD or CLONE_SIGHAND
+	 * needs to unshare vm.
 	 */
 	if (unshare_flags & (CLONE_THREAD | CLONE_SIGHAND | CLONE_VM)) {
-		if (!thread_group_empty(current))
-			return -EINVAL;
-	}
-	if (unshare_flags & (CLONE_SIGHAND | CLONE_VM)) {
-		if (atomic_read(&current->sighand->count) > 1)
-			return -EINVAL;
-	}
-	if (unshare_flags & CLONE_VM) {
-		if (!current_is_single_threaded())
+		/* FIXME: get_task_mm() increments ->mm_users */
+		if (atomic_read(&current->mm->mm_users) > 1)
 			return -EINVAL;
 	}
 
@@ -1918,15 +1849,15 @@ SYSCALL_DEFINE1(unshare, unsigned long, unshare_flags)
 	if (unshare_flags & CLONE_NEWPID)
 		unshare_flags |= CLONE_THREAD;
 	/*
+	 * If unsharing a thread from a thread group, must also unshare vm.
+	 */
+	if (unshare_flags & CLONE_THREAD)
+		unshare_flags |= CLONE_VM;
+	/*
 	 * If unsharing vm, must also unshare signal handlers.
 	 */
 	if (unshare_flags & CLONE_VM)
 		unshare_flags |= CLONE_SIGHAND;
-	/*
-	 * If unsharing a signal handlers, must also unshare the signal queues.
-	 */
-	if (unshare_flags & CLONE_SIGHAND)
-		unshare_flags |= CLONE_THREAD;
 	/*
 	 * If unsharing namespace, must also unshare filesystem information.
 	 */

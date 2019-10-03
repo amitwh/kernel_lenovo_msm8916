@@ -152,19 +152,18 @@ enum {
 	SWP_CONTINUED	= (1 << 5),	/* swap_map has count continuation */
 	SWP_BLKDEV	= (1 << 6),	/* its a block device */
 	SWP_FILE	= (1 << 7),	/* set after swap_activate success */
-	SWP_FAST	= (1 << 8),	/* blkdev access is fast and cheap */
 					/* add others here before... */
-	SWP_SCANNING	= (1 << 9),	/* refcount in scan_swap_map */
+	SWP_SCANNING	= (1 << 8),	/* refcount in scan_swap_map */
 };
 
 #define SWAP_CLUSTER_MAX 32UL
 #define COMPACT_CLUSTER_MAX SWAP_CLUSTER_MAX
 
 /*
- * Ratio between zone->managed_pages and the "gap" that above the per-zone
- * "high_wmark". While balancing nodes, We allow kswapd to shrink zones that
- * do not meet the (high_wmark + gap) watermark, even which already met the
- * high_wmark, in order to provide better per-zone lru behavior. We are ok to
+ * Ratio between the present memory in the zone and the "gap" that
+ * we're allowing kswapd to shrink in addition to the per-zone high
+ * wmark, even for zones that already have the high wmark satisfied,
+ * in order to provide better per-zone lru behavior. We are ok to
  * spend not more than 1% of the memory for this zone balancing "gap".
  */
 #define KSWAPD_ZONE_BALANCE_GAP_RATIO 100
@@ -294,6 +293,22 @@ static inline int zone_reclaim(struct zone *z, gfp_t mask, unsigned int order)
 extern int page_evictable(struct page *page);
 extern void check_move_unevictable_pages(struct page **, int nr_pages);
 
+extern unsigned long scan_unevictable_pages;
+extern int scan_unevictable_handler(struct ctl_table *, int,
+					void __user *, size_t *, loff_t *);
+#ifdef CONFIG_NUMA
+extern int scan_unevictable_register_node(struct node *node);
+extern void scan_unevictable_unregister_node(struct node *node);
+#else
+static inline int scan_unevictable_register_node(struct node *node)
+{
+	return 0;
+}
+static inline void scan_unevictable_unregister_node(struct node *node)
+{
+}
+#endif
+
 extern int kswapd_run(int nid);
 extern void kswapd_stop(int nid);
 #ifdef CONFIG_MEMCG
@@ -341,27 +356,16 @@ extern void free_pages_and_swap_cache(struct page **, int);
 extern struct page *lookup_swap_cache(swp_entry_t);
 extern struct page *read_swap_cache_async(swp_entry_t, gfp_t,
 			struct vm_area_struct *vma, unsigned long addr);
-extern struct page *__read_swap_cache_async(swp_entry_t, gfp_t,
-			struct vm_area_struct *vma, unsigned long addr,
-			bool *new_page_allocated);
 extern struct page *swapin_readahead(swp_entry_t, gfp_t,
 			struct vm_area_struct *vma, unsigned long addr);
 
 /* linux/mm/swapfile.c */
 extern atomic_long_t nr_swap_pages;
 extern long total_swap_pages;
-extern bool is_swap_fast(swp_entry_t entry);
 
 /* Swap 50% full? Release swapcache more aggressively.. */
-static inline bool vm_swap_full(struct swap_info_struct *si)
+static inline bool vm_swap_full(void)
 {
-	/*
-	 * If the swap device is fast, return true
-	 * not to delay swap free.
-	 */
-	if (si->flags & SWP_FAST)
-		return true;
-
 	return atomic_long_read(&nr_swap_pages) * 2 < total_swap_pages;
 }
 
@@ -385,7 +389,6 @@ extern unsigned int count_swap_pages(int, int);
 extern sector_t map_swap_page(struct page *, struct block_device **);
 extern sector_t swapdev_block(int, pgoff_t);
 extern int page_swapcount(struct page *);
-extern int swp_swapcount(swp_entry_t entry);
 extern struct swap_info_struct *page_swap_info(struct page *);
 extern int reuse_swap_page(struct page *);
 extern int try_to_free_swap(struct page *);
@@ -406,7 +409,7 @@ mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent, bool swapout)
 #define get_nr_swap_pages()			0L
 #define total_swap_pages			0L
 #define total_swapcache_pages()			0UL
-#define vm_swap_full(si)			0
+#define vm_swap_full()				0
 
 #define si_swapinfo(val) \
 	do { (val)->freeswap = (val)->totalswap = 0; } while (0)
@@ -482,11 +485,6 @@ static inline void delete_from_swap_cache(struct page *page)
 }
 
 static inline int page_swapcount(struct page *page)
-{
-	return 0;
-}
-
-static inline int swp_swapcount(swp_entry_t entry)
 {
 	return 0;
 }

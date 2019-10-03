@@ -28,7 +28,6 @@
 #include <linux/input-polldev.h>
 #include <linux/regulator/consumer.h>
 #include <linux/of.h>
-#ifdef CONFIG_MACH_WT86518
 #include <linux/hardware_info.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
@@ -39,7 +38,6 @@
 #include <linux/kthread.h>
 
 #define POLL_MS_100HZ 10
-#endif
 
 #define ACCEL_INPUT_DEV_NAME	"accelerometer"
 #define DEVICE_NAME		"kxtj9"
@@ -80,17 +78,11 @@
 #define RES_INT_CTRL1		2
 #define RESUME_ENTRIES		3
 /* POWER SUPPLY VOLTAGE RANGE */
-#ifdef CONFIG_MACH_WT86518
 #define KXTJ9_VDD_MIN_UV	1750000
 #define KXTJ9_VDD_MAX_UV	1950000
-#else
-#define KXTJ9_VDD_MIN_UV	2000000
-#define KXTJ9_VDD_MAX_UV	3300000
-#endif
 #define KXTJ9_VIO_MIN_UV	1750000
 #define KXTJ9_VIO_MAX_UV	1950000
 
-#ifdef CONFIG_MACH_WT86518
 #define GS_GET_RAW_DATA_FOR_CALI	_IOW('c', 9, int *)
 #define GS_REC_DATA_FOR_PER	_IOW('c', 10, int *)
 #define GS_ENABLE	_IOW('c', 11, int *)
@@ -102,7 +94,6 @@
 #else
 #define wing_info(fmt, ...) \
 	no_printk(KERN_INFO pr_fmt(fmt), ##__VA_ARGS__)
-#endif
 #endif
 /*
  * The following table lists the maximum appropriate poll interval for each
@@ -139,14 +130,13 @@ static const struct {
 	{ 80,	ODR25F  },
 	{ 0,	ODR12_5F},
 };
-#ifdef CONFIG_MACH_WT86518
 struct cali_data{
 	int x ;
 	int y ;
 	int z ;
 	int offset;
 };
-#endif
+
 struct kxtj9_data {
 	struct i2c_client *client;
 	struct kxtj9_platform_data pdata;
@@ -160,25 +150,21 @@ struct kxtj9_data {
 	u8 ctrl_reg1;
 	u8 data_ctrl;
 	u8 int_ctrl;
-#ifdef CONFIG_MACH_WT86518
 	int tj9_wkp_flag;
 	bool tj9_delay_change;
-#endif
+
 	bool	power_enabled;
 	struct regulator *vdd;
 	struct regulator *vio;
 	struct sensors_classdev cdev;
-#ifdef CONFIG_MACH_WT86518
 	struct cali_data per_cali_g;
 	struct task_struct *tj9_task;
 	struct hrtimer	poll_timer;
 	wait_queue_head_t	tj9_wq;
-#endif
 };
-#ifdef CONFIG_MACH_WT86518
 struct kxtj9_data *kxtj9_info;
 static int enable_changed;
-#endif
+
 static int kxtj9_i2c_read(struct kxtj9_data *tj9, u8 addr, u8 *data, int len)
 {
 	struct i2c_msg msgs[] = {
@@ -204,11 +190,10 @@ static void kxtj9_report_acceleration_data(struct kxtj9_data *tj9)
 	s16 acc_data[3]; /* Data bytes from hardware xL, xH, yL, yH, zL, zH */
 	s16 x, y, z;
 	int err;
-#ifdef CONFIG_MACH_WT86518
 	ktime_t	timestamp;
 
 	timestamp = ktime_get_boottime();
-#endif
+
 	err = kxtj9_i2c_read(tj9, XOUT_L, (u8 *)acc_data, 6);
 	if (err < 0)
 		dev_err(&tj9->client->dev, "accelerometer data read failed\n");
@@ -227,7 +212,6 @@ static void kxtj9_report_acceleration_data(struct kxtj9_data *tj9)
 	x >>= tj9->shift;
 	y >>= tj9->shift;
 	z >>= tj9->shift;
-#ifdef CONFIG_MACH_WT86518
 	wing_info("gsensor per x = %d,y = %d,z = %d\n",tj9->per_cali_g.x,tj9->per_cali_g.y,tj9->per_cali_g.z);
 	wing_info("gsensor x = %d,y = %d,z = %d\n",tj9->pdata.negate_x ? -x : x,tj9->pdata.negate_y ? -y : y,tj9->pdata.negate_z ? -z : z);
 	if(tj9->enable){
@@ -245,12 +229,6 @@ static void kxtj9_report_acceleration_data(struct kxtj9_data *tj9)
 		}
 		enable_changed = 1;
 	}
-#else
-	input_report_abs(tj9->input_dev, ABS_X, tj9->pdata.negate_x ? -x : x);	
-	input_report_abs(tj9->input_dev, ABS_Y, tj9->pdata.negate_y ? -y : y);
-	input_report_abs(tj9->input_dev, ABS_Z, tj9->pdata.negate_z ? -z : z);	
-	input_sync(tj9->input_dev);
-#endif	
 }
 
 static irqreturn_t kxtj9_isr(int irq, void *dev)
@@ -581,23 +559,18 @@ static int kxtj9_enable_set(struct sensors_classdev *sensors_cdev,
 		disable_irq(tj9->client->irq);
 		kxtj9_disable(tj9);
 		tj9->enable = false;
-#ifdef CONFIG_MACH_WT86518
 		enable_changed = 1;
 		hrtimer_cancel(&tj9->poll_timer);
-#endif
 	} else if (enabled == 1) {
 		if (!kxtj9_enable(tj9)) {
 			enable_irq(tj9->client->irq);
 			tj9->enable = true;
-#ifdef CONFIG_MACH_WT86518
 			enable_changed = 0;
 		}
 		hrtimer_start(&tj9->poll_timer,
 				ns_to_ktime(tj9->last_poll_interval * NSEC_PER_MSEC),
 				HRTIMER_MODE_REL);
-#else
-		}
-#endif
+
 
 	} else {
 		dev_err(&tj9->client->dev,
@@ -658,28 +631,23 @@ static int kxtj9_poll_delay_set(struct sensors_classdev *sensors_cdev,
 	struct kxtj9_data *tj9 = container_of(sensors_cdev,
 					struct kxtj9_data, cdev);
 	struct input_dev *input_dev = tj9->input_dev;
-#ifdef CONFIG_MACH_WT86518
+
 	tj9->tj9_delay_change = true;
-#endif
 	/* Lock the device to prevent races with open/close (and itself) */
 	mutex_lock(&input_dev->mutex);
 
 	if (tj9->enable)
 		disable_irq(tj9->client->irq);
-#ifdef CONFIG_MACH_WT86518
+
 	tj9->last_poll_interval = delay_msec;
-#else
-	tj9->last_poll_interval = max(delay_msec, tj9->pdata.min_interval);
-#endif
+	
 	if (tj9->enable) {
 		kxtj9_update_odr(tj9, tj9->last_poll_interval);
 		enable_irq(tj9->client->irq);
-#ifdef CONFIG_MACH_WT86518
 		hrtimer_cancel(&tj9->poll_timer);
 		hrtimer_start(&tj9->poll_timer,
 					ns_to_ktime(tj9->last_poll_interval * NSEC_PER_MSEC),
 					HRTIMER_MODE_REL);
-#endif
 	}
 	mutex_unlock(&input_dev->mutex);
 
@@ -728,7 +696,6 @@ static struct attribute *kxtj9_attributes[] = {
 static struct attribute_group kxtj9_attribute_group = {
 	.attrs = kxtj9_attributes
 };
-#ifdef CONFIG_MACH_WT86518
 static int akm_poll_thread(void *data)
 {
 	struct kxtj9_data *sensor = data;
@@ -768,10 +735,9 @@ static enum hrtimer_restart akm_timer_func(struct hrtimer *hrtimer)
 	wake_up_interruptible(&sensor->tj9_wq);
 	return HRTIMER_RESTART;
 }
-#endif
 
 #ifdef CONFIG_INPUT_KXTJ9_POLLED_MODE
-#ifndef CONFIG_MACH_WT86518
+#if 0
 static void kxtj9_poll(struct input_polled_dev *dev)
 {
 	struct kxtj9_data *tj9 = dev->private;
@@ -861,11 +827,7 @@ static int kxtj9_verify(struct kxtj9_data *tj9)
 		dev_err(&tj9->client->dev, "read err int source\n");
 		goto out;
 	}
-#ifdef CONFIG_MACH_WT86518
 	retval = (retval != 0x05 && retval != 0x07 && retval != 0x08 && retval != 0x09)
-#else
-	retval = (retval != 0x05 && retval != 0x07 && retval != 0x08)
-#endif
 			? -EIO : 0;
 
 out:
@@ -961,7 +923,6 @@ static int kxtj9_parse_dt(struct device *dev,
 }
 #endif /* !CONFIG_OF */
 
-#ifdef CONFIG_MACH_WT86518
 /* GS open fops */
 
 int gsensor_open(struct inode *inode, struct file *file)
@@ -1049,7 +1010,7 @@ struct miscdevice gsensor_misc = {
 	.name = "gsensor",
 	.fops = &gsensor_fops
 };
-#endif
+
 static int kxtj9_probe(struct i2c_client *client,
 				 const struct i2c_device_id *id)
 {
@@ -1090,12 +1051,10 @@ static int kxtj9_probe(struct i2c_client *client,
 
 	tj9->client = client;
 	tj9->power_enabled = false;
-#ifdef CONFIG_MACH_WT86518
 	kxtj9_info = tj9;
 	tj9->per_cali_g.x = 0;
 	tj9->per_cali_g.y = 0;
 	tj9->per_cali_g.z = 0;
-#endif
 	
 	if (tj9->pdata.init) {
 		err = tj9->pdata.init();
@@ -1121,11 +1080,10 @@ static int kxtj9_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, tj9);
-#ifdef CONFIG_MACH_WT86518
+
 	err = kxtj9_setup_input_device(tj9);
 	if (err)
 		goto err_power_off;
-#endif
 
 	tj9->ctrl_reg1 = tj9->pdata.res_ctl | tj9->pdata.g_range;
 	tj9->last_poll_interval = tj9->pdata.init_interval;
@@ -1136,25 +1094,18 @@ static int kxtj9_probe(struct i2c_client *client,
 	tj9->cdev.delay_msec = tj9->pdata.init_interval;
 	tj9->cdev.sensors_enable = kxtj9_enable_set;
 	tj9->cdev.sensors_poll_delay = kxtj9_poll_delay_set;
-#ifdef CONFIG_MACH_WT86518
 	err = sensors_classdev_register(&client->dev, &tj9->cdev);
-#else
-	err = sensors_classdev_register(&tj9->input_dev->dev, &tj9->cdev);
-#endif
 	if (err) {
 		dev_err(&client->dev, "class device create failed: %d\n", err);
 		goto err_power_off;
 	}
-#ifdef CONFIG_MACH_WT86518
+	
 	err = misc_register(&gsensor_misc);
 	if (err < 0) {
 		return err;
 	}
 	
 	if (0) {
-#else
-	if (client->irq) {
-#endif
 		/* If in irq mode, populate INT_CTRL_REG1 and enable DRDY. */
 		tj9->int_ctrl |= KXTJ9_IEN | KXTJ9_IEA | KXTJ9_IEL;
 		tj9->ctrl_reg1 |= DRDYE;
@@ -1180,7 +1131,6 @@ static int kxtj9_probe(struct i2c_client *client,
 		}
 
 	} else {
-#ifdef CONFIG_MACH_WT86518
 		/*err = kxtj9_setup_polled_device(tj9);
 		if (err)
 			goto err_power_off;*/
@@ -1193,12 +1143,7 @@ static int kxtj9_probe(struct i2c_client *client,
 	}
 
 	hardwareinfo_set_prop(HARDWARE_ACCELEROMETER,"kxtj2");	
-#else
-		err = kxtj9_setup_polled_device(tj9);
-		if (err)
-		goto err_power_off;
-	}
-#endif
+
 	dev_dbg(&client->dev, "%s: kxtj9_probe OK.\n", __func__);
 	kxtj9_device_power_off(tj9);
 	return 0;

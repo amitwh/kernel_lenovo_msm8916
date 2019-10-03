@@ -95,9 +95,6 @@
 #if defined(CONFIG_SYSCTL)
 
 /* External variables not in a header file. */
-#ifdef CONFIG_USB
-extern int deny_new_usb;
-#endif
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
 extern int max_threads;
@@ -310,16 +307,14 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_freq_inc_notify,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "sched_freq_dec_notify",
 		.data		= &sysctl_sched_freq_dec_notify,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname       = "sched_migration_fixup",
@@ -373,20 +368,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= sched_hmp_proc_update_handler,
 	},
 	{
-		.procname	= "sched_mostly_idle_load",
-		.data		= &sysctl_sched_mostly_idle_load_pct,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= sched_hmp_proc_update_handler,
-	},
-	{
-		.procname	= "sched_mostly_idle_nr_run",
-		.data		= &sysctl_sched_mostly_idle_nr_run,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
 		.procname	= "sched_spill_load",
 		.data		= &sysctl_sched_spill_load_pct,
 		.maxlen		= sizeof(unsigned int),
@@ -398,8 +379,7 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_spill_nr_run,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &zero,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "sched_upmigrate",
@@ -420,7 +400,7 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_upmigrate_min_nice,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= sched_hmp_proc_update_handler,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "sched_prefer_idle",
@@ -479,20 +459,6 @@ static struct ctl_table kern_table[] = {
 		.extra1		= &min_wakeup_granularity_ns,
 		.extra2		= &max_wakeup_granularity_ns,
 	},
-	{
-		.procname	= "sched_yield_sleep_threshold",
-		.data		= &sysctl_sched_yield_sleep_threshold,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "sched_yield_sleep_duration",
-		.data		= &sysctl_sched_yield_sleep_duration,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
 #ifdef CONFIG_SMP
 	{
 		.procname	= "sched_tunable_scaling",
@@ -522,8 +488,7 @@ static struct ctl_table kern_table[] = {
 		.data		= &sysctl_sched_time_avg,
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= &one,
+		.proc_handler	= proc_dointvec,
 	},
 	{
 		.procname	= "sched_shares_window_ns",
@@ -968,17 +933,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec_minmax_sysadmin,
 		.extra1		= &zero,
 		.extra2		= &two,
-	},
-#endif
-#ifdef CONFIG_USB
-	{
-		.procname	= "deny_new_usb",
-		.data		= &deny_new_usb,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec_minmax_sysadmin,
-		.extra1		= &zero,
-		.extra2		= &one,
 	},
 #endif
 	{
@@ -1646,6 +1600,13 @@ static struct ctl_table vm_table[] = {
 		.extra2		= &one,
 	},
 #endif
+	{
+		.procname	= "scan_unevictable_pages",
+		.data		= &scan_unevictable_pages,
+		.maxlen		= sizeof(scan_unevictable_pages),
+		.mode		= 0644,
+		.proc_handler	= scan_unevictable_handler,
+	},
 #ifdef CONFIG_MEMORY_FAILURE
 	{
 		.procname	= "memory_failure_early_kill",
@@ -1680,28 +1641,6 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_doulongvec_minmax,
 	},
-#ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
-	{
-		.procname	= "mmap_rnd_bits",
-		.data		= &mmap_rnd_bits,
-		.maxlen		= sizeof(mmap_rnd_bits),
-		.mode		= 0600,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&mmap_rnd_bits_min,
-		.extra2		= (void *)&mmap_rnd_bits_max,
-	},
-#endif
-#ifdef CONFIG_HAVE_ARCH_MMAP_RND_COMPAT_BITS
-	{
-		.procname	= "mmap_rnd_compat_bits",
-		.data		= &mmap_rnd_compat_bits,
-		.maxlen		= sizeof(mmap_rnd_compat_bits),
-		.mode		= 0600,
-		.proc_handler	= proc_dointvec_minmax,
-		.extra1		= (void *)&mmap_rnd_compat_bits_min,
-		.extra2		= (void *)&mmap_rnd_compat_bits_max,
-	},
-#endif
 	{ }
 };
 
@@ -1874,20 +1813,6 @@ static struct ctl_table fs_table[] = {
 		.mode		= 0644,
 		.proc_handler	= &pipe_proc_fn,
 		.extra1		= &pipe_min_size,
-	},
-	{
-		.procname	= "pipe-user-pages-hard",
-		.data		= &pipe_user_pages_hard,
-		.maxlen		= sizeof(pipe_user_pages_hard),
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax,
-	},
-	{
-		.procname	= "pipe-user-pages-soft",
-		.data		= &pipe_user_pages_soft,
-		.maxlen		= sizeof(pipe_user_pages_soft),
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax,
 	},
 	{ }
 };
@@ -2467,7 +2392,6 @@ static int __do_proc_doulongvec_minmax(void *data, struct ctl_table *table, int 
 				break;
 			if (neg)
 				continue;
-			val = convmul * val / convdiv;
 			if ((min && val < *min) || (max && val > *max))
 				continue;
 			*i = val;

@@ -2711,12 +2711,11 @@ EXPORT_SYMBOL(skb_append_datato_frags);
  */
 unsigned char *skb_pull_rcsum(struct sk_buff *skb, unsigned int len)
 {
-	unsigned char *data = skb->data;
-
 	BUG_ON(len > skb->len);
-	__skb_pull(skb, len);
-	skb_postpull_rcsum(skb, data, len);
-	return skb->data;
+	skb->len -= len;
+	BUG_ON(skb->len < skb->data_len);
+	skb_postpull_rcsum(skb, skb->data, len);
+	return skb->data += len;
 }
 EXPORT_SYMBOL_GPL(skb_pull_rcsum);
 
@@ -2811,6 +2810,7 @@ struct sk_buff *skb_segment(struct sk_buff *skb, netdev_features_t features)
 		tail = nskb;
 
 		__copy_skb_header(nskb, skb);
+		nskb->mac_len = skb->mac_len;
 
 		/* nskb and skb might have different headroom */
 		if (nskb->ip_summed == CHECKSUM_PARTIAL)
@@ -2820,7 +2820,6 @@ struct sk_buff *skb_segment(struct sk_buff *skb, netdev_features_t features)
 		skb_set_network_header(nskb, skb->mac_len);
 		nskb->transport_header = (nskb->network_header +
 					  skb_network_header_len(skb));
-		skb_reset_mac_len(nskb);
 
 		skb_copy_from_linear_data_offset(skb, -tnl_hlen,
 						 nskb->data - tnl_hlen,
@@ -3272,6 +3271,7 @@ static void sock_rmem_free(struct sk_buff *skb)
  */
 int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb)
 {
+	int len = skb->len;
 
 	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
 	    (unsigned int)sk->sk_rcvbuf)
@@ -3287,7 +3287,7 @@ int sock_queue_err_skb(struct sock *sk, struct sk_buff *skb)
 
 	skb_queue_tail(&sk->sk_error_queue, skb);
 	if (!sock_flag(sk, SOCK_DEAD))
-		sk->sk_error_report(sk);
+		sk->sk_data_ready(sk, len);
 	return 0;
 }
 EXPORT_SYMBOL(sock_queue_err_skb);

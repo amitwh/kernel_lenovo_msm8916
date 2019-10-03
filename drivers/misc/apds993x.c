@@ -566,6 +566,36 @@ static int apds993x_set_control(struct i2c_client *client, int control)
 	return ret;
 }
 
+static void apds993x_report_ps_event(struct input_dev *ps_dev,
+			const unsigned int dist)
+{
+	ktime_t ts;
+
+	ts = ktime_get();
+
+	input_event(ps_dev, EV_SYN, SYN_TIME_SEC,
+			ktime_to_timespec(ts).tv_sec);
+	input_event(ps_dev, EV_SYN, SYN_TIME_NSEC,
+			ktime_to_timespec(ts).tv_nsec);
+	input_report_abs(ps_dev, ABS_DISTANCE, dist);
+	input_sync(ps_dev);
+}
+
+static void apds993x_report_als_event(struct input_dev *als_dev,
+			const unsigned int lux)
+{
+	ktime_t ts;
+
+	ts = ktime_get();
+
+	input_event(als_dev, EV_SYN, SYN_TIME_SEC,
+				ktime_to_timespec(ts).tv_sec);
+	input_event(als_dev, EV_SYN, SYN_TIME_NSEC,
+		ktime_to_timespec(ts).tv_nsec);
+	input_report_abs(als_dev, ABS_MISC, lux);
+	input_sync(als_dev);
+}
+
 /*calibration*/
 void apds993x_swap(int *x, int *y)
 {
@@ -725,20 +755,6 @@ static int LuxCalculation(struct i2c_client *client, int ch0data, int ch1data)
 	return luxValue;
 }
 
-static inline void apds993x_report_value(struct input_dev *dev,
-			unsigned int code, int value)
-{
-	ktime_t timestamp;
-
-	timestamp = ktime_get_boottime();
-	input_report_abs(dev, code, value);
-	input_event(dev, EV_SYN, SYN_TIME_SEC,
-		ktime_to_timespec(timestamp).tv_sec);
-	input_event(dev, EV_SYN, SYN_TIME_NSEC,
-		ktime_to_timespec(timestamp).tv_nsec);
-	input_sync(dev);
-}
-
 static void apds993x_change_ps_threshold(struct i2c_client *client)
 {
 	struct apds993x_data *data = i2c_get_clientdata(client);
@@ -751,7 +767,7 @@ static void apds993x_change_ps_threshold(struct i2c_client *client)
 		data->ps_detection = 1;
 
 		/* FAR-to-NEAR detection */
-		apds993x_report_value(data->input_dev_ps, ABS_DISTANCE, 0);
+		apds993x_report_ps_event(data->input_dev_ps, 0);
 
 		i2c_smbus_write_word_data(client,
 				CMD_WORD|APDS993X_PILTL_REG,
@@ -769,7 +785,7 @@ static void apds993x_change_ps_threshold(struct i2c_client *client)
 		data->ps_detection = 0;
 
 		/* NEAR-to-FAR detection */
-		apds993x_report_value(data->input_dev_ps, ABS_DISTANCE, 1);
+		apds993x_report_ps_event(data->input_dev_ps, 1);
 
 		i2c_smbus_write_word_data(client,
 				CMD_WORD|APDS993X_PILTL_REG, 0);
@@ -837,7 +853,7 @@ static void apds993x_change_als_threshold(struct i2c_client *client)
 		 * from the PS
 		 */
 		/* NEAR-to-FAR detection */
-		apds993x_report_value(data->input_dev_ps, ABS_DISTANCE, 1);
+		apds993x_report_ps_event(data->input_dev_ps, 1);
 
 		i2c_smbus_write_word_data(client,
 				CMD_WORD|APDS993X_PILTL_REG, 0);
@@ -856,7 +872,7 @@ static void apds993x_change_als_threshold(struct i2c_client *client)
 
 	if (lux_is_valid)
 		/* report the lux level */
-		apds993x_report_value(data->input_dev_als, ABS_MISC, luxValue);
+		apds993x_report_als_event(data->input_dev_als, luxValue);
 
 	data->als_data = ch0data;
 
@@ -986,7 +1002,7 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 		 * from the PS
 		 */
 		/* NEAR-to-FAR detection */
-		apds993x_report_value(data->input_dev_ps, ABS_DISTANCE, 1);
+		apds993x_report_ps_event(data->input_dev_ps, 1);
 
 		i2c_smbus_write_word_data(client,
 				CMD_WORD|APDS993X_PILTL_REG, 0);
@@ -1003,7 +1019,7 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 
 	if (lux_is_valid)
 		/* report the lux level */
-		apds993x_report_value(data->input_dev_als, ABS_MISC, luxValue);
+		apds993x_report_als_event(data->input_dev_als, luxValue);
 
 	data->als_data = ch0data;
 
@@ -1629,7 +1645,7 @@ static ssize_t apds993x_show_ch0data(struct device *dev,
 			CMD_WORD|APDS993X_CH0DATAL_REG);
 	mutex_unlock(&data->update_lock);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", ch0data);
+	return sprintf(buf, "%d\n", ch0data);
 }
 
 static DEVICE_ATTR(ch0data, S_IRUGO, apds993x_show_ch0data, NULL);
@@ -1646,7 +1662,7 @@ static ssize_t apds993x_show_ch1data(struct device *dev,
 			CMD_WORD|APDS993X_CH1DATAL_REG);
 	mutex_unlock(&data->update_lock);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", ch1data);
+	return sprintf(buf, "%d\n", ch1data);
 }
 
 static DEVICE_ATTR(ch1data, S_IRUGO, apds993x_show_ch1data, NULL);
@@ -1665,7 +1681,7 @@ static ssize_t apds993x_show_pdata(struct device *dev,
 			CMD_WORD|APDS993X_PDATAH_REG) << 8;
 	mutex_unlock(&data->update_lock);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", pdata);
+	return sprintf(buf, "%d\n", pdata);
 }
 
 static DEVICE_ATTR(pdata, S_IRUGO, apds993x_show_pdata, NULL);
@@ -1687,7 +1703,7 @@ static ssize_t apds993x_show_status(struct device *dev,
 	pr_info("%s: APDS993x_ENABLE_REG=%2d APDS993x_STATUS_REG=%2d\n",
 			__func__, rdata, status);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", status);
+	return sprintf(buf, "%d\n", status);
 }
 
 static DEVICE_ATTR(status, S_IRUSR | S_IRGRP, apds993x_show_status, NULL);
@@ -1698,7 +1714,7 @@ static ssize_t apds993x_show_ps_run_calibration(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", data->avg_cross_talk);
+	return sprintf(buf, "%d\n", data->avg_cross_talk);
 }
 
 static ssize_t apds993x_store_ps_run_calibration(struct device *dev,
@@ -1734,7 +1750,7 @@ static DEVICE_ATTR(ps_run_calibration,  S_IWUSR | S_IWGRP | S_IRUGO,
 static ssize_t apds993x_show_ps_default_crosstalk(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE ,  "%d\n", DEFAULT_CROSS_TALK);
+	return sprintf(buf, "%d\n", DEFAULT_CROSS_TALK);
 }
 
 static ssize_t apds993x_store_ps_default_crosstalk(struct device *dev,
@@ -1766,7 +1782,7 @@ static ssize_t apds993x_show_ps_cal_result(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", data->ps_cal_result);
+	return sprintf(buf, "%d\n", data->ps_cal_result);
 }
 
 static DEVICE_ATTR(ps_cal_result, S_IRUGO, apds993x_show_ps_cal_result, NULL);
@@ -1779,7 +1795,7 @@ static ssize_t apds993x_show_enable_ps_sensor(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
-	return snprintf(buf, PAGE_SIZE ,  "%d\n", data->enable_ps_sensor);
+	return sprintf(buf, "%d\n", data->enable_ps_sensor);
 }
 
 static ssize_t apds993x_store_enable_ps_sensor(struct device *dev,
@@ -1810,7 +1826,7 @@ static ssize_t apds993x_show_enable_als_sensor(struct device *dev,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
-	return snprintf(buf, PAGE_SIZE , "%d\n", data->enable_als_sensor);
+	return sprintf(buf, "%d\n", data->enable_als_sensor);
 }
 
 static ssize_t apds993x_store_enable_als_sensor(struct device *dev,
@@ -2736,16 +2752,14 @@ static int apds993x_probe(struct i2c_client *client,
 	}
 	memset(&data->ps_cdev.cal_result, 0 , sizeof(data->ps_cdev.cal_result));
 
-	err = sensors_classdev_register(&data->input_dev_als->dev,
-			&data->als_cdev);
+	err = sensors_classdev_register(&client->dev, &data->als_cdev);
 	if (err) {
 		pr_err("%s: Unable to register to sensors class: %d\n",
 				__func__, err);
 		goto exit_unregister_als_ioctl;
 	}
 
-	err = sensors_classdev_register(&data->input_dev_ps->dev,
-			&data->ps_cdev);
+	err = sensors_classdev_register(&client->dev, &data->ps_cdev);
 	if (err) {
 		pr_err("%s: Unable to register to sensors class: %d\n",
 			       __func__, err);

@@ -345,21 +345,8 @@ static int sync_fence_merge_pts(struct sync_fence *dst, struct sync_fence *src)
 			 * the later of the two
 			 */
 			if (dst_pt->parent == src_pt->parent) {
-				int cmp_val;
-				int (*cmp_fn)
-					(struct sync_pt *, struct sync_pt *);
-
-				cmp_fn = dst_pt->parent->ops->compare;
-				cmp_val = cmp_fn(dst_pt, src_pt);
-
-				/*
-				 * Out-of-order users like oneshot don't follow
-				 * a timeline ordering.
-				 */
-				if (cmp_val != -cmp_fn(src_pt, dst_pt))
-					break;
-
-				if (cmp_val == -1) {
+				if (dst_pt->parent->ops->compare(dst_pt, src_pt)
+						 == -1) {
 					struct sync_pt *new_pt =
 						sync_pt_dup(src_pt);
 					if (new_pt == NULL)
@@ -395,7 +382,6 @@ static void sync_fence_detach_pts(struct sync_fence *fence)
 
 	list_for_each_safe(pos, n, &fence->pt_list_head) {
 		struct sync_pt *pt = container_of(pos, struct sync_pt, pt_list);
-
 		sync_timeline_remove_pt(pt);
 	}
 }
@@ -406,7 +392,6 @@ static void sync_fence_free_pts(struct sync_fence *fence)
 
 	list_for_each_safe(pos, n, &fence->pt_list_head) {
 		struct sync_pt *pt = container_of(pos, struct sync_pt, pt_list);
-
 		sync_pt_free(pt);
 	}
 }
@@ -611,7 +596,7 @@ static const char *sync_status_str(int status)
 		return "error";
 }
 
-static void sync_pt_log(struct sync_pt *pt, bool pt_callback)
+static void sync_pt_log(struct sync_pt *pt)
 {
 	int status = pt->status;
 	pr_cont("  %s_pt %s",
@@ -636,11 +621,11 @@ static void sync_pt_log(struct sync_pt *pt, bool pt_callback)
 	pr_cont("\n");
 
 	/* Show additional details for active fences */
-	if (pt->status == 0 && pt->parent->ops->pt_log && pt_callback)
+	if (pt->status == 0 && pt->parent->ops->pt_log)
 		pt->parent->ops->pt_log(pt);
 }
 
-void _sync_fence_log(struct sync_fence *fence, bool pt_callback)
+void sync_fence_log(struct sync_fence *fence)
 {
 	struct list_head *pos;
 	unsigned long flags;
@@ -664,13 +649,8 @@ void _sync_fence_log(struct sync_fence *fence, bool pt_callback)
 	list_for_each(pos, &fence->pt_list_head) {
 		struct sync_pt *pt =
 			container_of(pos, struct sync_pt, pt_list);
-		sync_pt_log(pt, pt_callback);
+		sync_pt_log(pt);
 	}
-}
-
-void sync_fence_log(struct sync_fence *fence)
-{
-	_sync_fence_log(fence, false);
 }
 EXPORT_SYMBOL(sync_fence_log);
 
@@ -698,16 +678,16 @@ int sync_fence_wait(struct sync_fence *fence, long timeout)
 		return err;
 
 	if (fence->status < 0) {
-		pr_info("fence error %d on [%pK]\n", fence->status, fence);
-		_sync_fence_log(fence, true);
+		pr_info("fence error %d on [%p]\n", fence->status, fence);
+		sync_fence_log(fence);
 		return fence->status;
 	}
 
 	if (fence->status == 0) {
 		if (timeout > 0) {
-			pr_info("fence timeout on [%pK] after %dms\n", fence,
+			pr_info("fence timeout on [%p] after %dms\n", fence,
 				jiffies_to_msecs(timeout));
-			_sync_fence_log(fence, true);
+			sync_fence_log(fence);
 		}
 		return -ETIME;
 	}
@@ -913,7 +893,6 @@ static long sync_fence_ioctl(struct file *file, unsigned int cmd,
 			     unsigned long arg)
 {
 	struct sync_fence *fence = file->private_data;
-
 	switch (cmd) {
 	case SYNC_IOC_WAIT:
 		return sync_fence_ioctl_wait(fence, arg);
@@ -933,21 +912,18 @@ static long sync_fence_ioctl(struct file *file, unsigned int cmd,
 static void sync_print_pt(struct seq_file *s, struct sync_pt *pt, bool fence)
 {
 	int status = pt->status;
-
 	seq_printf(s, "  %s%spt %s",
 		   fence ? pt->parent->name : "",
 		   fence ? "_" : "",
 		   sync_status_str(status));
 	if (pt->status) {
 		struct timeval tv = ktime_to_timeval(pt->timestamp);
-
 		seq_printf(s, "@%ld.%06ld", tv.tv_sec, tv.tv_usec);
 	}
 
 	if (pt->parent->ops->timeline_value_str &&
 	    pt->parent->ops->pt_value_str) {
 		char value[64];
-
 		pt->parent->ops->pt_value_str(pt, value, sizeof(value));
 		seq_printf(s, ": %s", value);
 		if (fence) {
@@ -972,7 +948,6 @@ static void sync_print_obj(struct seq_file *s, struct sync_timeline *obj)
 
 	if (obj->ops->timeline_value_str) {
 		char value[64];
-
 		obj->ops->timeline_value_str(obj, value, sizeof(value));
 		seq_printf(s, ": %s", value);
 	} else if (obj->ops->print_obj) {
@@ -996,7 +971,7 @@ static void sync_print_fence(struct seq_file *s, struct sync_fence *fence)
 	struct list_head *pos;
 	unsigned long flags;
 
-	seq_printf(s, "[%pK] %s: %s\n", fence, fence->name,
+	seq_printf(s, "[%p] %s: %s\n", fence, fence->name,
 		   sync_status_str(fence->status));
 
 	list_for_each(pos, &fence->pt_list_head) {

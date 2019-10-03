@@ -259,11 +259,7 @@ int qpnp_pon_set_restart_reason(enum pon_restart_reason reason)
 		return 0;
 
 	rc = qpnp_pon_masked_write(pon, QPNP_PON_SOFT_RB_SPARE(pon->base),
-#ifdef CONFIG_MACH_WT86518
 					PON_MASK(7, 5), (reason << 5));
-#else
-					PON_MASK(7, 2), (reason << 2));
-#endif
 	if (rc)
 		dev_err(&pon->spmi->dev,
 				"Unable to write to addr=%x, rc(%d)\n",
@@ -1477,6 +1473,13 @@ static void qpnp_pon_debugfs_remove(struct spmi_device *spmi)
 {}
 #endif
 
+//+NewFeature,mahao.wt,ADD,2015.5.21,for PwrKey boot mode BL_ON CHGR current controll
+ #ifdef  WT_USE_FAN54015 
+bool PwrKeyBoot = false;      
+#endif
+//-NewFeature,mahao.wt,ADD,2015.5.21,for PwrKey boot mode BL_ON CHGR current controll
+
+
 static int qpnp_pon_probe(struct spmi_device *spmi)
 {
 	struct qpnp_pon *pon;
@@ -1546,6 +1549,18 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	boot_reason = ffs(pon_sts);
 
 	index = ffs(pon_sts) - 1;
+
+ //+NewFeature,mahao.wt,ADD,2015.5.21,for PwrKey boot mode BL_ON CHGR current controll
+   #ifdef  WT_USE_FAN54015		
+			
+      if(index!=4) // if boot mode != chareger boot mode,then apply dynamic charger current
+	 {
+         	  printk(KERN_WARNING  "~PON:%s\n",qpnp_pon_reason[index]); 	   
+		  PwrKeyBoot = true; 
+         }
+ #endif
+ //-NewFeature,mahao.wt,ADD,2015.5.21,for PwrKey boot mode BL_ON CHGR current controll
+	
 	cold_boot = !qpnp_pon_is_warm_reset();
 	if (index >= ARRAY_SIZE(qpnp_pon_reason) || index < 0) {
 		dev_info(&pon->spmi->dev,
@@ -1681,15 +1696,6 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 	if (rc) {
 		dev_err(&spmi->dev, "sys file creation failed\n");
 		return rc;
-	}
-
-	if (of_property_read_bool(spmi->dev.of_node,
-					"qcom,pon-reset-off")) {
-		rc = qpnp_pon_trigger_config(PON_CBLPWR_N, false);
-		if (rc) {
-			dev_err(&spmi->dev, "failed update the PON_CBLPWR %d\n",
-				rc);
-		}
 	}
 
 	/* config whether store the hard reset reason */

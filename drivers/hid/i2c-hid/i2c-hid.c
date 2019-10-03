@@ -134,7 +134,6 @@ struct i2c_hid {
 						   * descriptor. */
 	unsigned int		bufsize;	/* i2c buffer size */
 	char			*inbuf;		/* Input buffer */
-	char			*rawbuf;	/* Raw Input buffer */
 	char			*cmdbuf;	/* Command buffer */
 	char			*argsbuf;	/* Command arguments buffer */
 
@@ -326,15 +325,6 @@ static int i2c_hid_hwreset(struct i2c_client *client)
 	if (ret)
 		return ret;
 
-	/*
-	 * The HID over I2C specification states that if a DEVICE needs time
-	 * after the PWR_ON request, it should utilise CLOCK stretching.
-	 * However, it has been observered that the Windows driver provides a
-	 * 1ms sleep between the PWR_ON and RESET requests and that some devices
-	 * rely on this.
-	 */
-	usleep_range(1000, 5000);
-
 	i2c_hid_dbg(ihid, "resetting...\n");
 
 	ret = i2c_hid_command(client, &hid_reset_cmd, NULL, 0);
@@ -351,9 +341,6 @@ static void i2c_hid_get_input(struct i2c_hid *ihid)
 {
 	int ret, ret_size;
 	int size = le16_to_cpu(ihid->hdesc.wMaxInputLength);
-
-	if (size > ihid->bufsize)
-		size = ihid->bufsize;
 
 	ret = i2c_master_recv(ihid->client, ihid->inbuf, size);
 	if (ret != size) {
@@ -484,11 +471,9 @@ static void i2c_hid_find_max_report(struct hid_device *hid, unsigned int type,
 static void i2c_hid_free_buffers(struct i2c_hid *ihid)
 {
 	kfree(ihid->inbuf);
-	kfree(ihid->rawbuf);
 	kfree(ihid->argsbuf);
 	kfree(ihid->cmdbuf);
 	ihid->inbuf = NULL;
-	ihid->rawbuf = NULL;
 	ihid->cmdbuf = NULL;
 	ihid->argsbuf = NULL;
 	ihid->bufsize = 0;
@@ -504,11 +489,10 @@ static int i2c_hid_alloc_buffers(struct i2c_hid *ihid, size_t report_size)
 		       report_size; /* report */
 
 	ihid->inbuf = kzalloc(report_size, GFP_KERNEL);
-	ihid->rawbuf = kzalloc(report_size, GFP_KERNEL);
 	ihid->argsbuf = kzalloc(args_len, GFP_KERNEL);
 	ihid->cmdbuf = kzalloc(sizeof(union command) + args_len, GFP_KERNEL);
 
-	if (!ihid->inbuf || !ihid->rawbuf || !ihid->argsbuf || !ihid->cmdbuf) {
+	if (!ihid->inbuf || !ihid->argsbuf || !ihid->cmdbuf) {
 		i2c_hid_free_buffers(ihid);
 		return -ENOMEM;
 	}
@@ -535,12 +519,12 @@ static int i2c_hid_get_raw_report(struct hid_device *hid,
 
 	ret = i2c_hid_get_report(client,
 			report_type == HID_FEATURE_REPORT ? 0x03 : 0x01,
-			report_number, ihid->rawbuf, ask_count);
+			report_number, ihid->inbuf, ask_count);
 
 	if (ret < 0)
 		return ret;
 
-	ret_count = ihid->rawbuf[0] | (ihid->rawbuf[1] << 8);
+	ret_count = ihid->inbuf[0] | (ihid->inbuf[1] << 8);
 
 	if (ret_count <= 2)
 		return 0;
@@ -549,7 +533,7 @@ static int i2c_hid_get_raw_report(struct hid_device *hid,
 
 	/* The query buffer contains the size, dropping it in the reply */
 	count = min(count, ret_count - 2);
-	memcpy(buf, ihid->rawbuf + 2, count);
+	memcpy(buf, ihid->inbuf + 2, count);
 
 	return count;
 }
@@ -921,15 +905,6 @@ static int i2c_hid_acpi_pdata(struct i2c_client *client,
 	return 0;
 }
 
-static void i2c_hid_acpi_fix_up_power(struct device *dev)
-{
-	acpi_handle handle = ACPI_HANDLE(dev);
-	struct acpi_device *adev;
-
-	if (handle && acpi_bus_get_device(handle, &adev) == 0)
-		acpi_device_fix_up_power(adev);
-}
-
 static const struct acpi_device_id i2c_hid_acpi_match[] = {
 	{"ACPI0C50", 0 },
 	{"PNP0C50", 0 },
@@ -942,8 +917,6 @@ static inline int i2c_hid_acpi_pdata(struct i2c_client *client,
 {
 	return -ENODEV;
 }
-
-static inline void i2c_hid_acpi_fix_up_power(struct device *dev) {}
 #endif
 
 static int i2c_hid_probe(struct i2c_client *client,
@@ -993,8 +966,6 @@ static int i2c_hid_probe(struct i2c_client *client,
 	ret = i2c_hid_alloc_buffers(ihid, HID_MIN_BUFFER_SIZE);
 	if (ret < 0)
 		goto err;
-
-	i2c_hid_acpi_fix_up_power(&client->dev);
 
 	ret = i2c_hid_fetch_hid_descriptor(ihid);
 	if (ret < 0)

@@ -177,8 +177,7 @@ static int __do_page_fault(struct mm_struct *mm, unsigned long addr,
 good_area:
 	/*
 	 * Check that the permissions on the VMA allow for the fault which
-	 * occurred. If we encountered a write or exec fault, we must have
-	 * appropriate permissions, otherwise we allow any permission.
+	 * occurred.
 	 */
 	if (!(vma->vm_flags & vm_flags)) {
 		fault = VM_FAULT_BADACCESS;
@@ -200,7 +199,7 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	struct task_struct *tsk;
 	struct mm_struct *mm;
 	int fault, sig, code;
-	unsigned long vm_flags = VM_READ | VM_WRITE | VM_EXEC;
+	unsigned long vm_flags = VM_READ | VM_WRITE;
 	unsigned int mm_flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	tsk = current;
@@ -222,8 +221,7 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 
 	if (esr & ESR_LNX_EXEC) {
 		vm_flags = VM_EXEC;
-	} else if (((esr & ESR_EL1_WRITE) && !(esr & ESR_EL1_CM)) ||
-			((esr & ESR_EL1_CM) && !(mm_flags & FAULT_FLAG_USER))) {
+	} else if (esr & ESR_EL1_WRITE) {
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
 	}
@@ -283,7 +281,6 @@ retry:
 			 * starvation.
 			 */
 			mm_flags &= ~FAULT_FLAG_ALLOW_RETRY;
-			mm_flags |= FAULT_FLAG_TRIED;
 			goto retry;
 		}
 	}

@@ -55,9 +55,7 @@ extern int sysctl_sched_freq_dec_notify;
 
 #ifdef CONFIG_SCHED_HMP
 extern unsigned int sysctl_sched_spill_nr_run;
-extern unsigned int sysctl_sched_mostly_idle_nr_run;
 extern unsigned int sysctl_sched_spill_load_pct;
-extern unsigned int sysctl_sched_mostly_idle_load_pct;
 extern unsigned int sysctl_sched_small_task_pct;
 extern unsigned int sysctl_sched_upmigrate_pct;
 extern unsigned int sysctl_sched_downmigrate_pct;
@@ -93,8 +91,7 @@ extern unsigned int sysctl_sched_nr_migrate;
 extern unsigned int sysctl_sched_time_avg;
 extern unsigned int sysctl_timer_migration;
 extern unsigned int sysctl_sched_shares_window;
-extern unsigned int sysctl_sched_yield_sleep_duration;
-extern int sysctl_sched_yield_sleep_threshold;
+
 int sched_proc_update_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *length,
 		loff_t *ppos);

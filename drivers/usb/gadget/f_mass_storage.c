@@ -508,6 +508,7 @@ static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 	spin_unlock(&common->lock);
 }
 
+extern int luns_count;//shenyong.wt,20140912,add mtp+cdrom
 static int fsg_setup(struct usb_function *f,
 		     const struct usb_ctrlrequest *ctrl)
 {
@@ -554,8 +555,14 @@ static int fsg_setup(struct usb_function *f,
 				w_length != 1)
 			return -EDOM;
 		VDBG(fsg, "get max LUN\n");
-		*(u8 *)req->buf = fsg->common->nluns - 1;
+		//shenyong.wt,20140912,start.add mtp+cdrom
+		//printk("XXX::common->nluns=%d, luns_count=%d\r\n",fsg->common->nluns, luns_count);//hoper		
+		*(u8 *)req->buf = luns_count - 2;
+		//shenyong.wt,20140912,end.add mtp+cdrom
 
+		//+++Require,HuangNan_Wingtech,remove internal sd card
+		//*(u8 *)req->buf = fsg->common->nluns - 2;
+        //---Require,HuangNan_Wingtech,remove internal sd card
 		/* Respond with data/status */
 		req->length = min((u16)1, w_length);
 		return ep0_queue(fsg->common);
@@ -2749,7 +2756,6 @@ static int fsg_main_thread(void *common_)
 static DEVICE_ATTR(ro, 0644, fsg_show_ro, fsg_store_ro);
 static DEVICE_ATTR(nofua, 0644, fsg_show_nofua, fsg_store_nofua);
 static DEVICE_ATTR(file, 0644, fsg_show_file, fsg_store_file);
-static DEVICE_ATTR(cdrom, 0644, fsg_show_cdrom, fsg_store_cdrom);
 
 static struct device_attribute dev_attr_ro_cdrom =
 	__ATTR(ro, 0444, fsg_show_ro, NULL);
@@ -2835,10 +2841,6 @@ static int create_lun_device(struct fsg_common *common,
 			goto error_luns;
 
 		rc = device_create_file(&curlun->dev, &dev_attr_nofua);
-		if (rc)
-			goto error_luns;
-
-		rc = device_create_file(&curlun->dev, &dev_attr_cdrom);
 		if (rc)
 			goto error_luns;
 
@@ -3042,7 +3044,6 @@ static void fsg_common_release(struct kref *ref)
 #ifdef CONFIG_USB_MSC_PROFILING
 			device_remove_file(&lun->dev, &dev_attr_perf);
 #endif
-			device_remove_file(&lun->dev, &dev_attr_cdrom);
 			device_remove_file(&lun->dev, &dev_attr_nofua);
 			device_remove_file(&lun->dev,
 					   lun->cdrom

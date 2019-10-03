@@ -45,89 +45,103 @@
    their framework which is 0.1DegC. True resolution of 0.1DegC
    will result in the below table size to increase by 10 times */
 static const struct qpnp_vadc_map_pt adcmap_btm_threshold[] = {
-	{-300,	1642},
-	{-200,	1544},
-	{-100,	1414},
-	{0,	1260},
-	{10,	1244},
-	{20,	1228},
-	{30,	1212},
-	{40,	1195},
-	{50,	1179},
-	{60,	1162},
-	{70,	1146},
-	{80,	1129},
-	{90,	1113},
-	{100,	1097},
-	{110,	1080},
-	{120,	1064},
-	{130,	1048},
-	{140,	1032},
-	{150,	1016},
-	{160,	1000},
-	{170,	985},
-	{180,	969},
-	{190,	954},
-	{200,	939},
-	{210,	924},
-	{220,	909},
-	{230,	894},
-	{240,	880},
-	{250,	866},
-	{260,	852},
-	{270,	838},
-	{280,	824},
-	{290,	811},
-	{300,	798},
-	{310,	785},
-	{320,	773},
-	{330,	760},
-	{340,	748},
-	{350,	736},
-	{360,	725},
-	{370,	713},
-	{380,	702},
-	{390,	691},
-	{400,	681},
-	{410,	670},
-	{420,	660},
-	{430,	650},
-	{440,	640},
-	{450,	631},
-	{460,	622},
-	{470,	613},
-	{480,	604},
-	{490,	595},
-	{500,	587},
-	{510,	579},
-	{520,	571},
-	{530,	563},
-	{540,	556},
-	{550,	548},
-	{560,	541},
-	{570,	534},
-	{580,	527},
-	{590,	521},
-	{600,	514},
-	{610,	508},
-	{620,	502},
-	{630,	496},
-	{640,	490},
-	{650,	485},
-	{660,	281},
-	{670,	274},
-	{680,	267},
-	{690,	260},
-	{700,	254},
-	{710,	247},
-	{720,	241},
-	{730,	235},
-	{740,	229},
-	{750,	224},
-	{760,	218},
-	{770,	213},
-	{780,	208},
-	{790,	203}
+//+NewFeature,mahao.wt,MOD,2015.4.17,add for S86528B1 BattTemp detect accuracy
+	{-300,	1585},//-90
+	{-280,	1560},
+	{-260,	1535},//-90
+	{-240,	1510},
+	{-220,	1480},
+	{-200,	1470},//-70
+	{-180,	1447},
+	{-160,	1422},//-70
+	{-140,	1397},
+	{-120,	1370},
+	{-100,	1342},//-70
+	{-80,	1333},
+	{-60,	1313}, //-40
+	{-40,	1283},
+	{-20,	1252},
+	{0,	  1203},//-40
+	{10,	1190},
+	{20,	1175},
+	{30,	1161},
+	{40,	1147},
+	{50,	1133},
+	{60,	1119},
+	{70,	1105},
+	{80,	1091},
+	{90,	1077},
+	{100,	1073},//-30
+	{110,	1059},
+	{120,	1046},
+	{130,	1032},
+	{140,	1019},
+	{150,	1005},//-30
+	{160,	992},
+	{170,	979},
+	{180,	966},
+	{190,	953},
+	{200,	941},//-30
+	{210,	928},
+	{220,	916},
+	{230,	904},
+	{240,	892},
+	{250,	880},//-30
+	{260,	879},
+	{270,	867},
+	{280,	856},
+	{290,	845},
+	{300,	834},//-20
+	{310,	824},
+	{320,	813},
+	{330,	803},
+	{340,	793},
+	{350,	784},//-20
+	{360,	774},
+	{370,	763},
+	{380,	756},
+	{390,	747},
+	{400,	738},//-20
+	{410,	729},
+	{420,	721},
+	{430,	713},
+	{440,	705},
+	{450,	697},
+	{460,	690},
+	{470,	682},
+	{480,	675},
+	{490,	668},
+	{500,	661},
+	{510,	654},
+	{520,	648},
+	{530,	641},
+	{540,	635},
+	{550,	629},//-20
+	{560,	623},
+	{570,	618},
+	{580,	612},
+	{590,	607},
+	{600,	601},
+	{610,	596},
+	{620,	591},
+	{630,	586},
+	{640,	582},
+	{650,	577},
+	{660,	573},
+	{670,	568},
+	{680,	564},
+	{690,	560},
+	{700,	556},
+	{710,	552},
+	{720,	548},
+	{730,	545},
+	{740,	541},
+	{750,	538},
+	{760,	534},
+	{770,	531},
+	{780, 528},
+	{790, 525}
+//-NewFeature,mahao.wt,MOD,2015.4.17,add for S86528B1 BattTemp detect accuracy
 };
 
 static const struct qpnp_vadc_map_pt adcmap_qrd_btm_threshold[] = {
@@ -1590,59 +1604,6 @@ int32_t qpnp_adc_qrd_skuh_btm_scaler(struct qpnp_vadc_chip *chip,
 	return 0;
 }
 EXPORT_SYMBOL(qpnp_adc_qrd_skuh_btm_scaler);
-
-int32_t qpnp_adc_qrd_skue_btm_scaler(struct qpnp_vadc_chip *chip,
-		struct qpnp_adc_tm_btm_param *param,
-		uint32_t *low_threshold, uint32_t *high_threshold)
-{
-	struct qpnp_vadc_linear_graph btm_param;
-	int64_t low_output = 0, high_output = 0;
-	int rc = 0;
-
-	qpnp_get_vadc_gain_and_offset(chip, &btm_param, CALIB_RATIOMETRIC);
-
-	pr_debug("warm_temp:%d and cool_temp:%d\n", param->high_temp,
-				param->low_temp);
-	rc = qpnp_adc_map_voltage_temp(
-		adcmap_qrd_skue_btm_threshold,
-		ARRAY_SIZE(adcmap_qrd_skue_btm_threshold),
-		(param->low_temp),
-		&low_output);
-	if (rc) {
-		pr_debug("low_temp mapping failed with %d\n", rc);
-		return rc;
-	}
-
-	pr_debug("low_output:%lld\n", low_output);
-	low_output *= btm_param.dy;
-	do_div(low_output, btm_param.adc_vref);
-	low_output += btm_param.adc_gnd;
-
-	rc = qpnp_adc_map_voltage_temp(
-		adcmap_qrd_skue_btm_threshold,
-		ARRAY_SIZE(adcmap_qrd_skue_btm_threshold),
-		(param->high_temp),
-		&high_output);
-	if (rc) {
-		pr_debug("high temp mapping failed with %d\n", rc);
-		return rc;
-	}
-
-	pr_debug("high_output:%lld\n", high_output);
-	high_output *= btm_param.dy;
-	do_div(high_output, btm_param.adc_vref);
-	high_output += btm_param.adc_gnd;
-
-	/* btm low temperature correspondes to high voltage threshold */
-	*low_threshold = high_output;
-	/* btm high temperature correspondes to low voltage threshold */
-	*high_threshold = low_output;
-
-	pr_debug("high_volt:%d, low_volt:%d\n", *high_threshold,
-				*low_threshold);
-	return 0;
-}
-EXPORT_SYMBOL(qpnp_adc_qrd_skue_btm_scaler);
 
 int32_t qpnp_adc_smb_btm_rscaler(struct qpnp_vadc_chip *chip,
 		struct qpnp_adc_tm_btm_param *param,

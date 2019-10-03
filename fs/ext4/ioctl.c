@@ -102,8 +102,9 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	handle_t *handle;
 	int err;
 	struct inode *inode_bl;
+	struct ext4_inode_info *ei;
 	struct ext4_inode_info *ei_bl;
-	struct ext4_sb_info *sbi = EXT4_SB(sb);
+	struct ext4_sb_info *sbi;
 
 	if (inode->i_nlink != 1 || !S_ISREG(inode->i_mode)) {
 		err = -EINVAL;
@@ -114,6 +115,9 @@ static long swap_inode_boot_loader(struct super_block *sb,
 		err = -EPERM;
 		goto swap_boot_out;
 	}
+
+	sbi = EXT4_SB(sb);
+	ei = EXT4_I(inode);
 
 	inode_bl = ext4_iget(sb, EXT4_BOOT_LOADER_INO);
 	if (IS_ERR(inode_bl)) {
@@ -545,17 +549,9 @@ group_add_out:
 	}
 
 	case EXT4_IOC_SWAP_BOOT:
-	{
-		int err;
 		if (!(filp->f_mode & FMODE_WRITE))
 			return -EBADF;
-		err = mnt_want_write_file(filp);
-		if (err)
-			return err;
-		err = swap_inode_boot_loader(sb, inode);
-		mnt_drop_write_file(filp);
-		return err;
-	}
+		return swap_inode_boot_loader(sb, inode);
 
 	case EXT4_IOC_RESIZE_FS: {
 		ext4_fsblk_t n_blocks_count;

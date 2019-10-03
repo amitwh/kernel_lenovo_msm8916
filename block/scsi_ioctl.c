@@ -175,9 +175,6 @@ static void blk_set_cmd_filter_defaults(struct blk_cmd_filter *filter)
 	__set_bit(WRITE_16, filter->write_ok);
 	__set_bit(WRITE_LONG, filter->write_ok);
 	__set_bit(WRITE_LONG_2, filter->write_ok);
-	__set_bit(WRITE_SAME, filter->write_ok);
-	__set_bit(WRITE_SAME_16, filter->write_ok);
-	__set_bit(WRITE_SAME_32, filter->write_ok);
 	__set_bit(ERASE, filter->write_ok);
 	__set_bit(GPCMD_MODE_SELECT_10, filter->write_ok);
 	__set_bit(MODE_SELECT, filter->write_ok);
@@ -236,6 +233,7 @@ static int blk_fill_sghdr_rq(struct request_queue *q, struct request *rq,
 	 * fill in request structure
 	 */
 	rq->cmd_len = hdr->cmd_len;
+	rq->cmd_type = REQ_TYPE_BLOCK_PC;
 
 	rq->timeout = msecs_to_jiffies(hdr->timeout);
 	if (!rq->timeout)
@@ -316,7 +314,6 @@ static int sg_io(struct request_queue *q, struct gendisk *bd_disk,
 	rq = blk_get_request(q, writing ? WRITE : READ, GFP_KERNEL);
 	if (!rq)
 		return -ENOMEM;
-	blk_rq_set_block_pc(rq);
 
 	if (blk_fill_sghdr_rq(q, rq, hdr, mode)) {
 		blk_put_request(rq);
@@ -509,16 +506,17 @@ int sg_scsi_ioctl(struct request_queue *q, struct gendisk *disk, fmode_t mode,
 
 	if (bytes && blk_rq_map_kern(q, rq, buffer, bytes, __GFP_WAIT)) {
 		err = DRIVER_ERROR << 24;
-		goto error;
+		goto out;
 	}
 
 	memset(sense, 0, sizeof(sense));
 	rq->sense = sense;
 	rq->sense_len = 0;
-	blk_rq_set_block_pc(rq);
+	rq->cmd_type = REQ_TYPE_BLOCK_PC;
 
 	blk_execute_rq(q, disk, rq, 0);
 
+out:
 	err = rq->errors & 0xff;	/* only 8 bit SCSI status */
 	if (err) {
 		if (rq->sense_len && rq->sense) {
@@ -547,7 +545,7 @@ static int __blk_send_generic(struct request_queue *q, struct gendisk *bd_disk,
 	int err;
 
 	rq = blk_get_request(q, WRITE, __GFP_WAIT);
-	blk_rq_set_block_pc(rq);
+	rq->cmd_type = REQ_TYPE_BLOCK_PC;
 	rq->timeout = BLK_DEFAULT_SG_TIMEOUT;
 	rq->cmd[0] = cmd;
 	rq->cmd[4] = data;
@@ -699,8 +697,37 @@ int scsi_verify_blk_ioctl(struct block_device *bd, unsigned int cmd)
 	if (bd && bd == bd->bd_contains)
 		return 0;
 
+	/* Actually none of these is particularly useful on a partition,
+	 * but they are safe.
+	 */
+	switch (cmd) {
+	case SCSI_IOCTL_GET_IDLUN:
+	case SCSI_IOCTL_GET_BUS_NUMBER:
+	case SCSI_IOCTL_GET_PCI:
+	case SCSI_IOCTL_PROBE_HOST:
+	case SG_GET_VERSION_NUM:
+	case SG_SET_TIMEOUT:
+	case SG_GET_TIMEOUT:
+	case SG_GET_RESERVED_SIZE:
+	case SG_SET_RESERVED_SIZE:
+	case SG_EMULATED_HOST:
+		return 0;
+	case CDROM_GET_CAPABILITY:
+		/* Keep this until we remove the printk below.  udev sends it
+		 * and we do not want to spam dmesg about it.   CD-ROMs do
+		 * not have partitions, so we get here only for disks.
+		 */
+		return -ENOIOCTLCMD;
+	default:
+		break;
+	}
+
 	if (capable(CAP_SYS_RAWIO))
 		return 0;
+
+	/* In particular, rule out all resets and host-specific ioctls.  */
+	printk_ratelimited(KERN_WARNING
+			   "%s: sending ioctl %x to a partition!\n", current->comm, cmd);
 
 	return -ENOIOCTLCMD;
 }

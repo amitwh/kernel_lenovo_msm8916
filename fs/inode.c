@@ -333,10 +333,8 @@ EXPORT_SYMBOL(set_nlink);
  */
 void inc_nlink(struct inode *inode)
 {
-	if (unlikely(inode->i_nlink == 0)) {
-		WARN_ON(!(inode->i_state & I_LINKABLE));
+	if (WARN_ON(inode->i_nlink == 0))
 		atomic_long_dec(&inode->i_sb->s_remove_count);
-	}
 
 	inode->__i_nlink++;
 }
@@ -887,11 +885,7 @@ unsigned int get_next_ino(void)
 	}
 #endif
 
-	res++;
-	/* get_next_ino should not provide a 0 inode number */
-	if (unlikely(!res))
-		res++;
-	*p = res;
+	*p = ++res;
 	put_cpu_var(last_ino);
 	return res;
 }
@@ -1605,12 +1599,12 @@ int should_remove_suid(struct dentry *dentry)
 }
 EXPORT_SYMBOL(should_remove_suid);
 
-static int __remove_suid(struct vfsmount *mnt, struct dentry *dentry, int kill)
+static int __remove_suid(struct dentry *dentry, int kill)
 {
 	struct iattr newattrs;
 
 	newattrs.ia_valid = ATTR_FORCE | kill;
-	return notify_change2(mnt, dentry, &newattrs);
+	return notify_change(dentry, &newattrs);
 }
 
 int file_remove_suid(struct file *file)
@@ -1633,9 +1627,9 @@ int file_remove_suid(struct file *file)
 	if (killpriv)
 		error = security_inode_killpriv(dentry);
 	if (!error && killsuid)
-		error = __remove_suid(file->f_path.mnt, dentry, killsuid);
-	if (!error)
-		inode_has_no_xattr(inode);
+		error = __remove_suid(dentry, killsuid);
+	if (!error && (inode->i_sb->s_flags & MS_NOSEC))
+		inode->i_flags |= S_NOSEC;
 
 	return error;
 }
@@ -1831,14 +1825,8 @@ void inode_init_owner(struct inode *inode, const struct inode *dir,
 	inode->i_uid = current_fsuid();
 	if (dir && dir->i_mode & S_ISGID) {
 		inode->i_gid = dir->i_gid;
-
-		/* Directories are special, and always inherit S_ISGID */
 		if (S_ISDIR(mode))
 			mode |= S_ISGID;
-		else if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP) &&
-			 !in_group_p(inode->i_gid) &&
-			 !capable_wrt_inode_uidgid(dir, CAP_FSETID))
-			mode &= ~S_ISGID;
 	} else
 		inode->i_gid = current_fsgid();
 	inode->i_mode = mode;

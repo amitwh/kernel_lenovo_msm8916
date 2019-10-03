@@ -51,7 +51,6 @@ struct perf_guest_info_callbacks {
 #include <linux/atomic.h>
 #include <linux/sysfs.h>
 #include <linux/perf_regs.h>
-#include <linux/workqueue.h>
 #include <asm/local.h>
 
 struct perf_callchain_entry {
@@ -317,12 +316,6 @@ struct perf_event {
 	int				nr_siblings;
 	int				group_flags;
 	struct perf_event		*group_leader;
-
-	/*
-	 * Protect the pmu, attributes and context of a group leader.
-	 * Note: does not protect the pointer to the group_leader.
-	 */
-	struct mutex			group_leader_mutex;
 	struct pmu			*pmu;
 
 	enum perf_event_active_state	state;
@@ -440,6 +433,11 @@ struct perf_event {
 #endif /* CONFIG_PERF_EVENTS */
 };
 
+enum perf_event_context_type {
+	task_context,
+	cpu_context,
+};
+
 /**
  * struct perf_event_context - event context structure
  *
@@ -447,6 +445,7 @@ struct perf_event {
  */
 struct perf_event_context {
 	struct pmu			*pmu;
+	enum perf_event_context_type	type;
 	/*
 	 * Protect the states of the events in the list,
 	 * nr_active, and the list:
@@ -488,9 +487,6 @@ struct perf_event_context {
 	int				nr_cgroups;	 /* cgroup evts */
 	int				nr_branch_stack; /* branch_stack evt */
 	struct rcu_head			rcu_head;
-
-	struct delayed_work		orphans_remove;
-	bool				orphans_remove_sched;
 };
 
 /*
@@ -507,9 +503,8 @@ struct perf_cpu_context {
 	struct perf_event_context	*task_ctx;
 	int				active_oncpu;
 	int				exclusive;
-	struct hrtimer			hrtimer;
-	ktime_t				hrtimer_interval;
 	struct list_head		rotation_list;
+	int				jiffies_interval;
 	struct pmu			*unique_pmu;
 	struct perf_cgroup		*cgrp;
 };
@@ -714,11 +709,6 @@ extern int perf_cpu_time_max_percent_handler(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp,
 		loff_t *ppos);
 
-
-static inline bool perf_paranoid_any(void)
-{
-	return sysctl_perf_event_paranoid > 2;
-}
 
 static inline bool perf_paranoid_tracepoint_raw(void)
 {

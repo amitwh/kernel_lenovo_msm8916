@@ -200,7 +200,7 @@ void set_pgdat_percpu_threshold(pg_data_t *pgdat,
 			continue;
 
 		threshold = (*calculate_pressure)(zone);
-		for_each_online_cpu(cpu)
+		for_each_possible_cpu(cpu)
 			per_cpu_ptr(zone->pageset, cpu)->stat_threshold
 							= threshold;
 	}
@@ -629,10 +629,10 @@ static char * const migratetype_names[MIGRATE_TYPES] = {
 	"Unmovable",
 	"Reclaimable",
 	"Movable",
+	"Reserve",
 #ifdef CONFIG_CMA
 	"CMA",
 #endif
-	"Reserve",
 #ifdef CONFIG_MEMORY_ISOLATION
 	"Isolate",
 #endif
@@ -742,9 +742,6 @@ const char * const vmstat_text[] = {
 #endif
 	"nr_anon_transparent_hugepages",
 	"nr_free_cma",
-	"nr_swapcache",
-
-	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",
 	"nr_dirty_background_threshold",
 
@@ -1243,9 +1240,7 @@ static int vmstat_show(struct seq_file *m, void *arg)
 	unsigned long *l = arg;
 	unsigned long off = l - (unsigned long *)m->private;
 
-	seq_puts(m, vmstat_text[off]);
-	seq_put_decimal_ull(m, ' ', *l);
-	seq_putc(m, '\n');
+	seq_printf(m, "%s %lu\n", vmstat_text[off], *l);
 	return 0;
 }
 
@@ -1282,8 +1277,7 @@ int sysctl_stat_interval __read_mostly = HZ;
 static void vmstat_update(struct work_struct *w)
 {
 	refresh_cpu_vm_stats(smp_processor_id());
-	schedule_delayed_work_on(smp_processor_id(),
-		&__get_cpu_var(vmstat_work),
+	schedule_delayed_work(&__get_cpu_var(vmstat_work),
 		round_jiffies_relative(sysctl_stat_interval));
 }
 

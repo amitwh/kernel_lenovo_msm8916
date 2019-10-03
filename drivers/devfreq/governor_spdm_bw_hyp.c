@@ -84,10 +84,6 @@ static irqreturn_t threaded_isr(int irq, void *dev_id)
 			(int)desc.arg[0], ext_status);
 	mutex_lock(&devfreqs_lock);
 	list_for_each_entry(data, &devfreqs, list) {
-		if (data == NULL || data->devfreq == NULL) {
-			pr_err("Spurious interrupts\n");
-			break;
-		}
 		if (data->spdm_client == desc.ret[0]) {
 			devfreq_monitor_suspend(data->devfreq);
 			mutex_lock(&data->devfreq->lock);
@@ -300,7 +296,6 @@ static int gov_spdm_hyp_eh(struct devfreq *devfreq, unsigned int event,
 			mutex_unlock(&devfreqs_lock);
 			return -EINVAL;
 		}
-		spdm_data->enabled = true;
 		devfreq_monitor_start(devfreq);
 		break;
 
@@ -318,7 +313,6 @@ static int gov_spdm_hyp_eh(struct devfreq *devfreq, unsigned int event,
 		if (ext_status)
 			pr_err("External command %u failed with error %u",
 				(int)desc.arg[0], ext_status);
-		spdm_data->enabled = false;
 		break;
 
 	case DEVFREQ_GOV_INTERVAL:

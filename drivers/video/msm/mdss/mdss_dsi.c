@@ -23,9 +23,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/leds-qpnp-wled.h>
 #include <linux/clk.h>
-#ifdef CONFIG_MACH_WT86518
 #include <linux/pm_qos.h>
-#endif
 
 #include "mdss.h"
 #include "mdss_panel.h"
@@ -33,7 +31,7 @@
 #include "mdss_debug.h"
 
 #define XO_CLK_RATE	19200000
-#ifdef CONFIG_MACH_WT86518
+
 bool is_Lcm_Present = false;//heming@wingtech.com,20140730, disable lcm backlight when lcm is not connected
 
 #define DSI_DISABLE_PC_LATENCY 100
@@ -59,7 +57,6 @@ static void mdss_dsi_pm_qos_update_request(int val)
              pr_debug("%s: update request %d",__func__,val);
              pm_qos_update_request(&mdss_dsi_pm_qos_request, val);
 }
-#endif
 
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 					bool active);
@@ -70,7 +67,6 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	int i = 0;
-	int j = 0;
 
 	if (!pdev) {
 		pr_err("%s: invalid input\n", __func__);
@@ -87,16 +83,11 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 		rc = msm_dss_config_vreg(&pdev->dev,
 			ctrl_pdata->power_data[i].vreg_config,
 			ctrl_pdata->power_data[i].num_vreg, 1);
-		if (rc) {
+		if (rc)
 			pr_err("%s: failed to init vregs for %s\n",
 				__func__, __mdss_dsi_pm_name(i));
-			for (j = i-1; j >= 0; j--) {
-				msm_dss_config_vreg(&pdev->dev,
-				ctrl_pdata->power_data[j].vreg_config,
-				ctrl_pdata->power_data[j].num_vreg, 0);
-			}
-		}
 	}
+
 	return rc;
 }
 
@@ -157,15 +148,15 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	int i = 0;
-#ifdef CONFIG_MACH_WT86518
+
 	/*heming add to power off panel while LCM initaltion fail, Begin*/
 	if(!is_Lcm_Present)
 	{
 		pr_err("%s: LCM not connect do not enable lcm power\n", __func__);
 		return -EINVAL;
 	}
-	/*heming add to power off panel while LCM initaltion fail, End*/
-#endif
+	/*heming add to power off panel while LCM initaltion fail, End*/	
+
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
@@ -228,9 +219,9 @@ error:
 	return ret;
 }
 
-static int mdss_dsi_panel_power_lp(struct mdss_panel_data *pdata, int enable)
+static int mdss_dsi_panel_power_doze(struct mdss_panel_data *pdata, int enable)
 {
-	/* Panel power control when entering/exiting lp mode */
+	/* Panel power control when entering/exiting doze mode */
 	return 0;
 }
 
@@ -267,13 +258,12 @@ static int mdss_dsi_panel_power_ctrl(struct mdss_panel_data *pdata,
 		break;
 	case MDSS_PANEL_POWER_ON:
 		if (mdss_dsi_is_panel_on_lp(pdata))
-			ret = mdss_dsi_panel_power_lp(pdata, false);
+			ret = mdss_dsi_panel_power_doze(pdata, false);
 		else
 			ret = mdss_dsi_panel_power_on(pdata);
 		break;
-	case MDSS_PANEL_POWER_LP1:
-	case MDSS_PANEL_POWER_LP2:
-		ret = mdss_dsi_panel_power_lp(pdata, true);
+	case MDSS_PANEL_POWER_DOZE:
+		ret = mdss_dsi_panel_power_doze(pdata, true);
 		break;
 	default:
 		pr_err("%s: unknown panel power state requested (%d)\n",
@@ -509,7 +499,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata, int power_state)
 
 	panel_info = &ctrl_pdata->panel_data.panel_info;
 
-	pr_debug("%s+: ctrl=%pK ndx=%d power_state=%d\n",
+	pr_debug("%s+: ctrl=%p ndx=%d power_state=%d\n",
 		__func__, ctrl_pdata, ctrl_pdata->ndx, power_state);
 
 	if (power_state == panel_info->panel_power_state) {
@@ -518,7 +508,7 @@ static int mdss_dsi_off(struct mdss_panel_data *pdata, int power_state)
 		goto end;
 	}
 
-	if (mdss_panel_is_power_on(power_state)) {
+	if (power_state != MDSS_PANEL_POWER_OFF) {
 		pr_debug("%s: dsi_off with panel always on\n", __func__);
 		goto panel_power_ctrl;
 	}
@@ -597,7 +587,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 				panel_data);
 
 	cur_power_state = pdata->panel_info.panel_power_state;
-	pr_debug("%s+: ctrl=%pK ndx=%d cur_power_state=%d\n", __func__,
+	pr_debug("%s+: ctrl=%p ndx=%d cur_power_state=%d\n", __func__,
 		ctrl_pdata, ctrl_pdata->ndx, cur_power_state);
 
 	pinfo = &pdata->panel_info;
@@ -625,15 +615,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 	 * clocks.
 	 */
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_BUS_CLKS, 1);
-
-	/*
-	 * If ULPS during suspend feature is enabled, then DSI PHY was
-	 * left on during suspend. In this case, we do not need to reset/init
-	 * PHY. This would have already been done when the BUS clocks are
-	 * turned on. However, if cont splash is disabled, the first time DSI
-	 * is powered on, phy init needs to be done unconditionally.
-	 */
-	if (!pdata->panel_info.ulps_suspend_enabled || !ctrl_pdata->ulps) {
+	if (!pdata->panel_info.ulps_suspend_enabled) {
 		mdss_dsi_phy_sw_reset(ctrl_pdata);
 		mdss_dsi_phy_init(ctrl_pdata);
 		mdss_dsi_ctrl_setup(ctrl_pdata);
@@ -741,11 +723,9 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 				panel_data);
 	mipi  = &pdata->panel_info.mipi;
 
-	pr_debug("%s+: ctrl=%pK ndx=%d cur_blank_state=%d\n", __func__,
+	pr_debug("%s+: ctrl=%p ndx=%d cur_blank_state=%d\n", __func__,
 		ctrl_pdata, ctrl_pdata->ndx, pdata->panel_info.blank_state);
-#ifdef CONFIG_MACH_WT86518
 	mdss_dsi_pm_qos_update_request(DSI_DISABLE_PC_LATENCY);
-#endif
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 
 	if (pdata->panel_info.blank_state == MDSS_PANEL_BLANK_LOW_POWER) {
@@ -776,9 +756,7 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 
 error:
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-#ifdef CONFIG_MACH_WT86518
 	mdss_dsi_pm_qos_update_request(DSI_ENABLE_PC_LATENCY);
-#endif
 	pr_debug("%s-:\n", __func__);
 
 	return ret;
@@ -799,12 +777,12 @@ static int mdss_dsi_blank(struct mdss_panel_data *pdata, int power_state)
 				panel_data);
 	mipi = &pdata->panel_info.mipi;
 
-	pr_debug("%s+: ctrl=%pK ndx=%d power_state=%d\n",
+	pr_debug("%s+: ctrl=%p ndx=%d power_state=%d\n",
 		__func__, ctrl_pdata, ctrl_pdata->ndx, power_state);
 
 	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 
-	if (mdss_panel_is_power_on_lp(power_state)) {
+	if (power_state == MDSS_PANEL_POWER_DOZE) {
 		pr_debug("%s: low power state requested\n", __func__);
 		if (ctrl_pdata->low_power_config)
 			ret = ctrl_pdata->low_power_config(pdata, true);
@@ -857,32 +835,6 @@ error:
 	return ret;
 }
 
-static int mdss_dsi_post_panel_on(struct mdss_panel_data *pdata)
-{
-	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-
-	if (pdata == NULL) {
-		pr_err("%s: Invalid input data\n", __func__);
-		return -EINVAL;
-	}
-
-	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
-				panel_data);
-
-	pr_debug("%s+: ctrl=%pK ndx=%d\n", __func__,
-				ctrl_pdata, ctrl_pdata->ndx);
-
-	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
-
-	if (ctrl_pdata->post_panel_on)
-		ctrl_pdata->post_panel_on(pdata);
-
-	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-	pr_debug("%s-:\n", __func__);
-
-	return 0;
-}
-
 int mdss_dsi_cont_splash_on(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -901,7 +853,7 @@ int mdss_dsi_cont_splash_on(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
-	pr_debug("%s+: ctrl=%pK ndx=%d\n", __func__,
+	pr_debug("%s+: ctrl=%p ndx=%d\n", __func__,
 				ctrl_pdata, ctrl_pdata->ndx);
 
 	WARN((ctrl_pdata->ctrl_state & CTRL_STATE_PANEL_INIT),
@@ -1156,10 +1108,6 @@ static int mdss_dsi_dfps_config(struct mdss_panel_data *pdata, int new_fps)
 		sctrl_pdata = mdss_dsi_get_other_ctrl(ctrl_pdata);
 	}
 
-	ctrl_pdata->dfps_status = true;
-	if (sctrl_pdata)
-		sctrl_pdata->dfps_status = true;
-
 	if (new_fps !=
 		ctrl_pdata->panel_data.panel_info.mipi.frame_rate) {
 		if (pdata->panel_info.dfps_update
@@ -1298,10 +1246,7 @@ static int mdss_dsi_clk_refresh(struct mdss_panel_data *pdata)
 	return rc;
 }
 
-#ifdef CONFIG_MACH_WT86518
 int Packet_PLAG;
-#endif
-
 static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 				  int event, void *arg)
 {
@@ -1335,21 +1280,14 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		mdss_dsi_get_hw_revision(ctrl_pdata);
 		if (ctrl_pdata->on_cmds.link_state == DSI_LP_MODE)
 			rc = mdss_dsi_unblank(pdata);
-#ifdef CONFIG_MACH_WT86518
 		Packet_PLAG=0;
-#endif
-		break;
-	case MDSS_EVENT_POST_PANEL_ON:
-		rc = mdss_dsi_post_panel_on(pdata);
 		break;
 	case MDSS_EVENT_PANEL_ON:
 		ctrl_pdata->ctrl_state |= CTRL_STATE_MDP_ACTIVE;
 		if (ctrl_pdata->on_cmds.link_state == DSI_HS_MODE)
 			rc = mdss_dsi_unblank(pdata);
 		pdata->panel_info.esd_rdy = true;
-#ifdef CONFIG_MACH_WT86518
 		Packet_PLAG=0;
-#endif
 		break;
 	case MDSS_EVENT_BLANK:
 		power_state = (int) (unsigned long) arg;
@@ -1358,11 +1296,11 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		break;
 	case MDSS_EVENT_PANEL_OFF:
 		power_state = (int) (unsigned long) arg;
+		pdata->panel_info.esd_rdy = false;
 		ctrl_pdata->ctrl_state &= ~CTRL_STATE_MDP_ACTIVE;
 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
 			rc = mdss_dsi_blank(pdata, power_state);
-		if (!(pdata->panel_info.mipi.always_on))
-			rc = mdss_dsi_off(pdata, power_state);
+		rc = mdss_dsi_off(pdata, power_state);
 		break;
 	case MDSS_EVENT_CONT_SPLASH_FINISH:
 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
@@ -1499,17 +1437,13 @@ static struct device_node *mdss_dsi_find_panel_of_node(
 			       __func__);
 			goto end;
 		}
-#ifdef CONFIG_MACH_WT86518
 		is_Lcm_Present = true;//heming@wingtech.com,20140730, disable lcm backlight when lcmis not connected
-#endif
 		return dsi_pan_node;
 	}
 end:
 	if (strcmp(panel_name, NONE_PANEL))
 		dsi_pan_node = mdss_dsi_pref_prim_panel(pdev);
-#ifdef CONFIG_MACH_WT86518
 	is_Lcm_Present = false;//heming@wingtech.com,20140730, disable lcm backlight when lcm is notconnected
-#endif
 	return dsi_pan_node;
 }
 
@@ -1647,10 +1581,6 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		goto error_pan_node;
 	}
 
-	ctrl_pdata->cmd_clk_ln_recovery_en =
-		of_property_read_bool(pdev->dev.of_node,
-			"qcom,dsi-clk-ln-recovery");
-
 	if (mdss_dsi_is_te_based_esd(ctrl_pdata)) {
 		rc = devm_request_irq(&pdev->dev,
 			gpio_to_irq(ctrl_pdata->disp_te_gpio),
@@ -1662,14 +1592,11 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		}
 		disable_irq(gpio_to_irq(ctrl_pdata->disp_te_gpio));
 	}
-#ifdef CONFIG_MACH_WT86518
 	mdss_dsi_pm_qos_add_request();
-#endif
 	pr_debug("%s: Dsi Ctrl->%d initialized\n", __func__, index);
 	return 0;
 
 error_pan_node:
-	mdss_dsi_unregister_bl_settings(ctrl_pdata);
 	of_node_put(dsi_pan_node);
 	i--;
 error_vreg:
@@ -1702,9 +1629,9 @@ static int mdss_dsi_ctrl_remove(struct platform_device *pdev)
 		mdss_dsi_put_dt_vreg_data(&pdev->dev,
 			&ctrl_pdata->power_data[i]);
 	}
-#ifdef CONFIG_MACH_WT86518
+
 	mdss_dsi_pm_qos_remove_request();
-#endif
+
 	mfd = platform_get_drvdata(pdev);
 	msm_dss_iounmap(&ctrl_pdata->mmss_misc_io);
 	msm_dss_iounmap(&ctrl_pdata->phy_io);
@@ -1763,7 +1690,7 @@ int mdss_dsi_retrieve_ctrl_resources(struct platform_device *pdev, int mode,
 		return rc;
 	}
 
-	pr_info("%s: ctrl_base=%pK ctrl_size=%x phy_base=%pK phy_size=%x\n",
+	pr_info("%s: ctrl_base=%p ctrl_size=%x phy_base=%p phy_size=%x\n",
 		__func__, ctrl->ctrl_base, ctrl->reg_size, ctrl->phy_io.base,
 		ctrl->phy_io.len);
 
@@ -2054,8 +1981,7 @@ int dsi_panel_device_register(struct device_node *pan_node,
 			pr_err("%s: Panel power on failed\n", __func__);
 			return rc;
 		}
-		if (ctrl_pdata->bklt_ctrl == BL_PWM)
-			ctrl_pdata->pwm_enabled = 1;
+
 		pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
 		mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
 		ctrl_pdata->ctrl_state |=

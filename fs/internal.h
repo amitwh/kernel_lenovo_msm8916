@@ -50,7 +50,7 @@ extern int __inode_permission(struct inode *, int);
  * namespace.c
  */
 extern int copy_mount_options(const void __user *, unsigned long *);
-extern char *copy_mount_string(const void __user *);
+extern int copy_mount_string(const void __user *, char **);
 
 extern struct vfsmount *lookup_mnt(struct path *);
 extern int finish_automount(struct vfsmount *, struct path *);
@@ -74,17 +74,18 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 /*
  * file_table.c
  */
+extern void file_sb_list_add(struct file *f, struct super_block *sb);
+extern void file_sb_list_del(struct file *f);
+extern void mark_files_ro(struct super_block *);
 extern struct file *get_empty_filp(void);
 
 /*
  * super.c
  */
 extern int do_remount_sb(struct super_block *, int, void *, int);
-extern int do_remount_sb2(struct vfsmount *, struct super_block *, int,
-								void *, int);
 extern bool grab_super_passive(struct super_block *sb);
 extern struct dentry *mount_fs(struct file_system_type *,
-			       int, const char *, struct vfsmount *, void *);
+			       int, const char *, void *);
 extern struct super_block *user_get_super(dev_t);
 
 /*
@@ -95,12 +96,11 @@ struct open_flags {
 	umode_t mode;
 	int acc_mode;
 	int intent;
-	int lookup_flags;
 };
 extern struct file *do_filp_open(int dfd, struct filename *pathname,
-		const struct open_flags *op);
+		const struct open_flags *op, int flags);
 extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,
-		const char *, const struct open_flags *);
+		const char *, const struct open_flags *, int lookup_flags);
 
 extern long do_handle_open(int mountdirfd,
 			   struct file_handle __user *ufh, int open_flag);

@@ -361,13 +361,9 @@ static int ext4_valid_extent(struct inode *inode, struct ext4_extent *ext)
 	ext4_fsblk_t block = ext4_ext_pblock(ext);
 	int len = ext4_ext_get_actual_len(ext);
 	ext4_lblk_t lblock = le32_to_cpu(ext->ee_block);
+	ext4_lblk_t last = lblock + len - 1;
 
-	/*
-	 * We allow neither:
-	 *  - zero length
-	 *  - overflow/wrap-around
-	 */
-	if (lblock + len <= lblock)
+	if (lblock > last)
 		return 0;
 	return ext4_data_block_valid(EXT4_SB(inode->i_sb), block, len);
 }
@@ -456,10 +452,6 @@ static int __ext4_ext_check(const char *function, unsigned int line,
 	}
 	if (!ext4_valid_extent_entries(inode, eh, depth)) {
 		error_msg = "invalid extent entries";
-		goto corrupted;
-	}
-	if (unlikely(depth > 32)) {
-		error_msg = "too large eh_depth";
 		goto corrupted;
 	}
 	/* Verify checksum on non-root extent tree nodes */
@@ -750,12 +742,6 @@ ext4_ext_find_extent(struct inode *inode, ext4_lblk_t block,
 
 	eh = ext_inode_hdr(inode);
 	depth = ext_depth(inode);
-	if (depth < 0 || depth > EXT4_MAX_EXTENT_DEPTH) {
-		EXT4_ERROR_INODE(inode, "inode has invalid extent depth: %d",
-				 depth);
-		ret = -EIO;
-		goto err;
-	}
 
 	/* account possible depth increase */
 	if (!path) {
@@ -927,7 +913,6 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 	__le32 border;
 	ext4_fsblk_t *ablocks = NULL; /* array of allocated blocks */
 	int err = 0;
-	size_t ext_size = 0;
 
 	/* make decision: where to split? */
 	/* FIXME: now decision is simplest: at current extent */
@@ -1019,10 +1004,6 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 		le16_add_cpu(&neh->eh_entries, m);
 	}
 
-	/* zero out unused area in the extent block */
-	ext_size = sizeof(struct ext4_extent_header) +
-		sizeof(struct ext4_extent) * le16_to_cpu(neh->eh_entries);
-	memset(bh->b_data + ext_size, 0, inode->i_sb->s_blocksize - ext_size);
 	ext4_extent_block_csum_set(inode, neh);
 	set_buffer_uptodate(bh);
 	unlock_buffer(bh);
@@ -1102,11 +1083,6 @@ static int ext4_ext_split(handle_t *handle, struct inode *inode,
 				sizeof(struct ext4_extent_idx) * m);
 			le16_add_cpu(&neh->eh_entries, m);
 		}
-		/* zero out unused area in the extent block */
-		ext_size = sizeof(struct ext4_extent_header) +
-			(sizeof(struct ext4_extent) * le16_to_cpu(neh->eh_entries));
-		memset(bh->b_data + ext_size, 0,
-			inode->i_sb->s_blocksize - ext_size);
 		ext4_extent_block_csum_set(inode, neh);
 		set_buffer_uptodate(bh);
 		unlock_buffer(bh);
@@ -1172,7 +1148,6 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 	struct buffer_head *bh;
 	ext4_fsblk_t newblock;
 	int err = 0;
-	size_t ext_size = 0;
 
 	newblock = ext4_ext_new_meta_block(handle, inode, NULL,
 		newext, &err, flags);
@@ -1190,11 +1165,9 @@ static int ext4_ext_grow_indepth(handle_t *handle, struct inode *inode,
 		goto out;
 	}
 
-	ext_size = sizeof(EXT4_I(inode)->i_data);
 	/* move top-level index/leaf into new block */
-	memmove(bh->b_data, EXT4_I(inode)->i_data, ext_size);
-	/* zero out unused area in the extent block */
-	memset(bh->b_data + ext_size, 0, inode->i_sb->s_blocksize - ext_size);
+	memmove(bh->b_data, EXT4_I(inode)->i_data,
+		sizeof(EXT4_I(inode)->i_data));
 
 	/* set size of new block */
 	neh = ext_block_hdr(bh);
@@ -1749,8 +1722,7 @@ static void ext4_ext_try_to_merge_up(handle_t *handle,
 
 	brelse(path[1].p_bh);
 	ext4_free_blocks(handle, inode, NULL, blk, 1,
-			 EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET |
-			 EXT4_FREE_BLOCKS_RESERVE);
+			 EXT4_FREE_BLOCKS_METADATA | EXT4_FREE_BLOCKS_FORGET);
 }
 
 /*
@@ -3009,12 +2981,16 @@ static int ext4_ext_zeroout(struct inode *inode, struct ext4_extent *ex)
 {
 	ext4_fsblk_t ee_pblock;
 	unsigned int ee_len;
+	int ret;
 
 	ee_len    = ext4_ext_get_actual_len(ex);
 	ee_pblock = ext4_ext_pblock(ex);
 
-	return ext4_issue_zeroout(inode, le32_to_cpu(ex->ee_block), ee_pblock,
-				  ee_len);
+	ret = sb_issue_zeroout(inode->i_sb, ee_pblock, ee_len, GFP_NOFS);
+	if (ret > 0)
+		ret = 0;
+
+	return ret;
 }
 
 /*
@@ -4596,7 +4572,6 @@ retry:
 		ext4_falloc_update_inode(inode, mode, new_size,
 					 (map.m_flags & EXT4_MAP_NEW));
 		ext4_mark_inode_dirty(handle, inode);
-		ext4_update_inode_fsync_trans(handle, inode, 1);
 		if ((file->f_flags & O_SYNC) && ret >= max_blocks)
 			ext4_handle_sync(handle);
 		ret2 = ext4_journal_stop(handle);

@@ -55,7 +55,6 @@ static int kmem_cache_sanity_check(struct mem_cgroup *memcg, const char *name,
 			continue;
 		}
 
-#if !defined(CONFIG_SLUB)
 		/*
 		 * For simplicity, we won't check this in the list of memcg
 		 * caches. We have control over memcg naming, and if there
@@ -69,7 +68,6 @@ static int kmem_cache_sanity_check(struct mem_cgroup *memcg, const char *name,
 			s = NULL;
 			return -EINVAL;
 		}
-#endif
 	}
 
 	WARN_ON(strchr(name, ' '));	/* It confuses parsers */
@@ -185,9 +183,6 @@ kmem_cache_create_memcg(struct mem_cgroup *memcg, const char *name, size_t size,
 	 * passed flags.
 	 */
 	flags &= CACHE_CREATE_MASK;
-
-	/* Embrace davem */
-	flags |= SLAB_HWCACHE_ALIGN;
 
 	s = __kmem_cache_alias(memcg, name, size, align, flags, ctor);
 	if (s)

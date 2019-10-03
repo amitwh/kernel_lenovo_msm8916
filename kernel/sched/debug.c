@@ -232,14 +232,6 @@ void print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
 	SEQ_printf(m, "  .%-30s: %d\n", "throttle_count",
 			cfs_rq->throttle_count);
 #endif
-#ifdef CONFIG_CFS_BANDWIDTH
-	SEQ_printf(m, "  .%-30s: %d\n", "tg->cfs_bandwidth.timer_active",
-			cfs_rq->tg->cfs_bandwidth.timer_active);
-	SEQ_printf(m, "  .%-30s: %d\n", "throttled",
-			cfs_rq->throttled);
-	SEQ_printf(m, "  .%-30s: %d\n", "throttle_count",
-			cfs_rq->throttle_count);
-#endif
 
 	print_cfs_group_stats(m, cpu, cfs_rq->tg);
 #endif
@@ -314,6 +306,8 @@ do {									\
 	P(cpu_power);
 #endif
 #ifdef CONFIG_SCHED_HMP
+	P(mostly_idle_load);
+	P(mostly_idle_nr_run);
 	P(load_scale_factor);
 	P(capacity);
 	P(max_possible_capacity);
@@ -333,7 +327,6 @@ do {									\
 #define P64(n) SEQ_printf(m, "  .%-30s: %Ld\n", #n, rq->n);
 
 	P(yld_count);
-	P(yield_sleep_count);
 
 	P(sched_count);
 	P(sched_goidle);
@@ -407,7 +400,6 @@ static void sched_debug_header(struct seq_file *m)
 	P(sysctl_sched_child_runs_first);
 	P(sysctl_sched_features);
 #ifdef CONFIG_SCHED_HMP
-	P(sched_mostly_idle_load);
 	P(sched_small_task);
 	P(sched_upmigrate);
 	P(sched_downmigrate);
@@ -602,7 +594,7 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 
 		avg_atom = p->se.sum_exec_runtime;
 		if (nr_switches)
-			avg_atom = div64_ul(avg_atom, nr_switches);
+			do_div(avg_atom, nr_switches);
 		else
 			avg_atom = -1LL;
 

@@ -6,6 +6,5 @@ source "drivers/platform/goldfish/Kconfig"
 endif
 
 if ARCH_MSM
-source "drivers/platform/lenovo/Kconfig"
 source "drivers/platform/msm/Kconfig"
 endif

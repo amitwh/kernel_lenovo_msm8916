@@ -26,7 +26,8 @@
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
 
-#define ALARM_DELTA 300
+#define ALARM_DELTA 120
+
 
 /**
  * struct alarm_base - Alarm timer bases
@@ -92,10 +93,15 @@ void set_power_on_alarm(long secs, bool enable)
 	 *to power up the device before actual alarm
 	 *expiration
 	 */
+	#if 0
+	if (alarm_time <= rtc_secs)
+		goto disable_alarm;
+	#else
 	if ((alarm_time - ALARM_DELTA) > rtc_secs)
 		alarm_time -= ALARM_DELTA;
 	else
 		goto disable_alarm;
+	#endif
 
 	rtc_time_to_tm(alarm_time, &alarm.time);
 	alarm.enabled = 1;
@@ -441,13 +447,8 @@ int alarm_start(struct alarm *alarm, ktime_t start)
  */
 int alarm_start_relative(struct alarm *alarm, ktime_t start)
 {
-	struct alarm_base *base;
+	struct alarm_base *base = &alarm_bases[alarm->type];
 
-	if (alarm->type >= ALARM_NUMTYPE) {
-		pr_err("Array out of index\n");
-		return -EINVAL;
-	}
-	base = &alarm_bases[alarm->type];
 	start = ktime_add(start, base->gettime());
 	return alarm_start(alarm, start);
 }
@@ -473,15 +474,10 @@ void alarm_restart(struct alarm *alarm)
  */
 int alarm_try_to_cancel(struct alarm *alarm)
 {
-	struct alarm_base *base;
+	struct alarm_base *base = &alarm_bases[alarm->type];
 	unsigned long flags;
 	int ret;
 
-	if (alarm->type >= ALARM_NUMTYPE) {
-		pr_err("Array out of index\n");
-		return -EINVAL;
-	}
-	base = &alarm_bases[alarm->type];
 	spin_lock_irqsave(&base->lock, flags);
 	ret = hrtimer_try_to_cancel(&alarm->timer);
 	if (ret >= 0)
@@ -570,26 +566,18 @@ static enum alarmtimer_type clock2alarm(clockid_t clockid)
 static enum alarmtimer_restart alarm_handle_timer(struct alarm *alarm,
 							ktime_t now)
 {
-	unsigned long flags;
 	struct k_itimer *ptr = container_of(alarm, struct k_itimer,
 						it.alarm.alarmtimer);
-	enum alarmtimer_restart result = ALARMTIMER_NORESTART;
-
-	spin_lock_irqsave(&ptr->it_lock, flags);
-	if ((ptr->it_sigev_notify & ~SIGEV_THREAD_ID) != SIGEV_NONE) {
-		if (posix_timer_event(ptr, 0) != 0)
-			ptr->it_overrun++;
-	}
+	if (posix_timer_event(ptr, 0) != 0)
+		ptr->it_overrun++;
 
 	/* Re-add periodic timers */
 	if (ptr->it.alarm.interval.tv64) {
 		ptr->it_overrun += alarm_forward(alarm, now,
 						ptr->it.alarm.interval);
-		result = ALARMTIMER_RESTART;
+		return ALARMTIMER_RESTART;
 	}
-	spin_unlock_irqrestore(&ptr->it_lock, flags);
-
-	return result;
+	return ALARMTIMER_NORESTART;
 }
 
 /**
@@ -655,22 +643,18 @@ static int alarm_timer_create(struct k_itimer *new_timer)
  * @new_timer: k_itimer pointer
  * @cur_setting: itimerspec data to fill
  *
- * Copies out the current itimerspec data
+ * Copies the itimerspec data out from the k_itimer
  */
 static void alarm_timer_get(struct k_itimer *timr,
 				struct itimerspec *cur_setting)
 {
-	ktime_t relative_expiry_time =
-		alarm_expires_remaining(&(timr->it.alarm.alarmtimer));
+	memset(cur_setting, 0, sizeof(struct itimerspec));
 
-	if (ktime_to_ns(relative_expiry_time) > 0) {
-		cur_setting->it_value = ktime_to_timespec(relative_expiry_time);
-	} else {
-		cur_setting->it_value.tv_sec = 0;
-		cur_setting->it_value.tv_nsec = 0;
-	}
-
-	cur_setting->it_interval = ktime_to_timespec(timr->it.alarm.interval);
+	cur_setting->it_interval =
+			ktime_to_timespec(timr->it.alarm.interval);
+	cur_setting->it_value =
+		ktime_to_timespec(timr->it.alarm.alarmtimer.node.expires);
+	return;
 }
 
 /**
@@ -703,13 +687,8 @@ static int alarm_timer_set(struct k_itimer *timr, int flags,
 				struct itimerspec *new_setting,
 				struct itimerspec *old_setting)
 {
-	ktime_t exp;
-
 	if (!rtcdev)
 		return -ENOTSUPP;
-
-	if (flags & ~TIMER_ABSTIME)
-		return -EINVAL;
 
 	if (old_setting)
 		alarm_timer_get(timr, old_setting);
@@ -720,25 +699,8 @@ static int alarm_timer_set(struct k_itimer *timr, int flags,
 
 	/* start the timer */
 	timr->it.alarm.interval = timespec_to_ktime(new_setting->it_interval);
-
-	/*
-	 * Rate limit to the tick as a hot fix to prevent DOS. Will be
-	 * mopped up later.
-	 */
-	if (timr->it.alarm.interval.tv64 &&
-			ktime_to_ns(timr->it.alarm.interval) < TICK_NSEC)
-		timr->it.alarm.interval = ktime_set(0, TICK_NSEC);
-
-	exp = timespec_to_ktime(new_setting->it_value);
-	/* Convert (if necessary) to absolute time */
-	if (flags != TIMER_ABSTIME) {
-		ktime_t now;
-
-		now = alarm_bases[timr->it.alarm.alarmtimer.type].gettime();
-		exp = ktime_add(now, exp);
-	}
-
-	alarm_start(&timr->it.alarm.alarmtimer, exp);
+	alarm_start(&timr->it.alarm.alarmtimer,
+			timespec_to_ktime(new_setting->it_value));
 	return 0;
 }
 
@@ -869,9 +831,6 @@ static int alarm_timer_nsleep(const clockid_t which_clock, int flags,
 
 	if (!alarmtimer_get_rtcdev())
 		return -ENOTSUPP;
-
-	if (flags & ~TIMER_ABSTIME)
-		return -EINVAL;
 
 	if (!capable(CAP_WAKE_ALARM))
 		return -EPERM;

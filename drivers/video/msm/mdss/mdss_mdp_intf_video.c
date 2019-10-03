@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -64,10 +64,6 @@ struct mdss_mdp_video_ctx {
 	struct completion vsync_comp;
 	int wait_pending;
 
-	u32 default_fps;
-	u32 saved_vtotal;
-	u32 saved_vfporch;
-
 	atomic_t vsync_ref;
 	spinlock_t vsync_lock;
 	spinlock_t dfps_lock;
@@ -116,7 +112,7 @@ int mdss_mdp_video_addr_setup(struct mdss_data_type *mdata,
 
 	for (i = 0; i < count; i++) {
 		head[i].base = mdata->mdss_io.base + offsets[i];
-		pr_debug("adding Video Intf #%d offset=0x%x virt=%pK\n", i,
+		pr_debug("adding Video Intf #%d offset=0x%x virt=%p\n", i,
 				offsets[i], head[i].base);
 		head[i].ref_cnt = 0;
 		head[i].intf_num = i + MDSS_MDP_INTF0;
@@ -213,7 +209,7 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 			mutex_unlock(&ctl->offlock);
 			return;
 		} else {
-			pr_warn_once("line count is less. line_cnt = %d\n",
+			pr_warn("line count is less. line_cnt = %d\n",
 								line_cnt);
 			/* Add delay so that line count is in active region */
 			udelay(delay);
@@ -442,7 +438,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 			pr_err("Intf %d not in use\n", (inum + MDSS_MDP_INTF0));
 			return -ENODEV;
 		}
-		pr_debug("stop ctl=%d video Intf #%d base=%pK", ctl->num,
+		pr_debug("stop ctl=%d video Intf #%d base=%p", ctl->num,
 			ctx->intf_num, ctx->base);
 	} else {
 		pr_err("Invalid intf number: %d\n", (inum + MDSS_MDP_INTF0));
@@ -506,7 +502,6 @@ static int mdss_mdp_video_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 	intfs_num = ctl->intf_num - MDSS_MDP_INTF0;
 	ret = mdss_mdp_video_intfs_stop(ctl, ctl->panel_data, intfs_num);
 	if (IS_ERR_VALUE(ret)) {
-		mutex_unlock(&ctl->offlock);
 		pr_err("unable to stop video interface: %d\n", ret);
 		return ret;
 	}
@@ -610,7 +605,7 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 		if (rc == 0) {
 			pr_warn("vsync wait timeout %d, fallback to poll mode\n",
 					ctl->num);
-			ctx->polling_en = true;
+			ctx->polling_en++;
 			rc = mdss_mdp_video_pollwait(ctl);
 		} else {
 			rc = 0;
@@ -662,24 +657,24 @@ static void mdss_mdp_video_underrun_intr_done(void *arg)
 static int mdss_mdp_video_vfp_fps_update(struct mdss_mdp_video_ctx *ctx,
 				 struct mdss_panel_data *pdata, int new_fps)
 {
+	int curr_fps;
 	u32 add_v_lines = 0;
 	u32 current_vsync_period_f0, new_vsync_period_f0;
 	u32 vsync_period, hsync_period;
-	int diff;
 
 	vsync_period = mdss_panel_get_vtotal(&pdata->panel_info);
 	hsync_period = mdss_panel_get_htotal(&pdata->panel_info, true);
+	curr_fps = mdss_panel_get_framerate(&pdata->panel_info);
 
-	if (!ctx->default_fps) {
-		ctx->default_fps = mdss_panel_get_framerate(&pdata->panel_info);
-		ctx->saved_vtotal = vsync_period;
-		ctx->saved_vfporch = pdata->panel_info.lcdc.v_front_porch;
+	if (curr_fps > new_fps) {
+		add_v_lines = mult_frac(vsync_period,
+				(curr_fps - new_fps), new_fps);
+		pdata->panel_info.lcdc.v_front_porch += add_v_lines;
+	} else {
+		add_v_lines = mult_frac(vsync_period,
+				(new_fps - curr_fps), new_fps);
+		pdata->panel_info.lcdc.v_front_porch -= add_v_lines;
 	}
-
-	diff = ctx->default_fps - new_fps;
-	add_v_lines = mult_frac(ctx->saved_vtotal, diff, new_fps);
-	pdata->panel_info.lcdc.v_front_porch = ctx->saved_vfporch +
-			add_v_lines;
 
 	vsync_period = mdss_panel_get_vtotal(&pdata->panel_info);
 	current_vsync_period_f0 = mdp_video_read(ctx,
@@ -990,7 +985,6 @@ static int mdss_mdp_video_display(struct mdss_mdp_ctl *ctl, void *arg)
 		ctx->timegen_en = true;
 		rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_ON, NULL);
 		WARN(rc, "intf %d panel on error (%d)\n", ctl->intf_num, rc);
-		mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_POST_PANEL_ON, NULL);
 	}
 
 	return 0;
@@ -1159,7 +1153,7 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 				(inum + MDSS_MDP_INTF0));
 			return -EBUSY;
 		}
-		pr_debug("video Intf #%d base=%pK", ctx->intf_num, ctx->base);
+		pr_debug("video Intf #%d base=%p", ctx->intf_num, ctx->base);
 		ctx->ref_cnt++;
 	} else {
 		pr_err("Invalid intf number: %d\n", (inum + MDSS_MDP_INTF0));
@@ -1198,21 +1192,15 @@ static int mdss_mdp_video_intfs_setup(struct mdss_mdp_ctl *ctl,
 
 	dst_bpp = pinfo->fbc.enabled ? (pinfo->fbc.target_bpp) : (pinfo->bpp);
 
-	itp.width = mult_frac((pinfo->xres + pinfo->lcdc.border_left +
-			pinfo->lcdc.border_right), dst_bpp, pinfo->bpp);
-	itp.height = pinfo->yres + pinfo->lcdc.border_top +
-					pinfo->lcdc.border_bottom;
+	itp.width = mult_frac((pinfo->xres + pinfo->lcdc.xres_pad),
+				dst_bpp, pinfo->bpp);
+	itp.height = pinfo->yres + pinfo->lcdc.yres_pad;
 	itp.border_clr = pinfo->lcdc.border_clr;
 	itp.underflow_clr = pinfo->lcdc.underflow_clr;
 	itp.hsync_skew = pinfo->lcdc.hsync_skew;
 
-	/* tg active area is not work, hence yres should equal to height */
-	itp.xres = mult_frac((pinfo->xres + pinfo->lcdc.border_left +
-			pinfo->lcdc.border_right), dst_bpp, pinfo->bpp);
-
-	itp.yres = pinfo->yres + pinfo->lcdc.border_top +
-				pinfo->lcdc.border_bottom;
-
+	itp.xres = mult_frac(pinfo->xres, dst_bpp, pinfo->bpp);
+	itp.yres = pinfo->yres;
 	itp.h_back_porch = pinfo->lcdc.h_back_porch;
 	itp.h_front_porch = pinfo->lcdc.h_front_porch;
 	itp.v_back_porch = pinfo->lcdc.v_back_porch;

@@ -101,19 +101,19 @@ static struct ip_tunnel *ipip6_tunnel_lookup(struct net *net,
 	for_each_ip_tunnel_rcu(t, sitn->tunnels_r_l[h0 ^ h1]) {
 		if (local == t->parms.iph.saddr &&
 		    remote == t->parms.iph.daddr &&
-		    (!dev || !t->parms.link || dev->ifindex == t->parms.link) &&
+		    (!dev || !t->parms.link || dev->iflink == t->parms.link) &&
 		    (t->dev->flags & IFF_UP))
 			return t;
 	}
 	for_each_ip_tunnel_rcu(t, sitn->tunnels_r[h0]) {
 		if (remote == t->parms.iph.daddr &&
-		    (!dev || !t->parms.link || dev->ifindex == t->parms.link) &&
+		    (!dev || !t->parms.link || dev->iflink == t->parms.link) &&
 		    (t->dev->flags & IFF_UP))
 			return t;
 	}
 	for_each_ip_tunnel_rcu(t, sitn->tunnels_l[h1]) {
 		if (local == t->parms.iph.saddr &&
-		    (!dev || !t->parms.link || dev->ifindex == t->parms.link) &&
+		    (!dev || !t->parms.link || dev->iflink == t->parms.link) &&
 		    (t->dev->flags & IFF_UP))
 			return t;
 	}
@@ -176,7 +176,7 @@ static void ipip6_tunnel_clone_6rd(struct net_device *dev, struct sit_net *sitn)
 #ifdef CONFIG_IPV6_SIT_6RD
 	struct ip_tunnel *t = netdev_priv(dev);
 
-	if (dev == sitn->fb_tunnel_dev) {
+	if (t->dev == sitn->fb_tunnel_dev) {
 		ipv6_addr_set(&t->ip6rd.prefix, htonl(0x20020000), 0, 0, 0);
 		t->ip6rd.relay_prefix = 0;
 		t->ip6rd.prefixlen = 16;
@@ -245,13 +245,11 @@ static struct ip_tunnel *ipip6_tunnel_locate(struct net *net,
 	if (!create)
 		goto failed;
 
-	if (parms->name[0]) {
-		if (!dev_valid_name(parms->name))
-			goto failed;
+	if (parms->name[0])
 		strlcpy(name, parms->name, IFNAMSIZ);
-	} else {
+	else
 		strcpy(name, "sit%d");
-	}
+
 	dev = alloc_netdev(sizeof(*t), name, ipip6_tunnel_setup);
 	if (dev == NULL)
 		return NULL;
@@ -532,13 +530,13 @@ static int ipip6_err(struct sk_buff *skb, u32 info)
 
 	if (type == ICMP_DEST_UNREACH && code == ICMP_FRAG_NEEDED) {
 		ipv4_update_pmtu(skb, dev_net(skb->dev), info,
-				 t->parms.link, 0, iph->protocol, 0);
+				 t->parms.link, 0, IPPROTO_IPV6, 0);
 		err = 0;
 		goto out;
 	}
 	if (type == ICMP_REDIRECT) {
 		ipv4_redirect(skb, dev_net(skb->dev), t->parms.link, 0,
-			      iph->protocol, 0);
+			      IPPROTO_IPV6, 0);
 		err = 0;
 		goto out;
 	}
@@ -921,7 +919,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
 		iph->ttl	=	iph6->hop_limit;
 
 	skb->ip_summed = CHECKSUM_NONE;
-	ip_select_ident(skb, NULL);
+	ip_select_ident(skb, skb_dst(skb), NULL);
 	iptunnel_xmit(skb, dev);
 	return NETDEV_TX_OK;
 

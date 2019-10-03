@@ -41,7 +41,7 @@ extern int strcmp(const char *,const char *);
 extern int strncmp(const char *,const char *,__kernel_size_t);
 #endif
 #ifndef __HAVE_ARCH_STRNICMP
-#define strnicmp strncasecmp
+extern int strnicmp(const char *, const char *, __kernel_size_t);
 #endif
 #ifndef __HAVE_ARCH_STRCASECMP
 extern int strcasecmp(const char *s1, const char *s2);
@@ -115,7 +115,6 @@ void *memchr_inv(const void *s, int c, size_t n);
 extern char *kstrdup(const char *s, gfp_t gfp);
 extern char *kstrndup(const char *s, size_t len, gfp_t gfp);
 extern void *kmemdup(const void *src, size_t len, gfp_t gfp);
-extern char *kmemdup_nul(const char *s, size_t len, gfp_t gfp);
 
 extern char **argv_split(gfp_t gfp, const char *str, int *argcp);
 extern void argv_free(char **argv);
@@ -130,7 +129,7 @@ int bprintf(u32 *bin_buf, size_t size, const char *fmt, ...) __printf(3, 4);
 #endif
 
 extern ssize_t memory_read_from_buffer(void *to, size_t count, loff_t *ppos,
-				       const void *from, size_t available);
+			const void *from, size_t available);
 
 /**
  * strstarts - does @str start with @prefix?
@@ -142,8 +141,7 @@ static inline bool strstarts(const char *str, const char *prefix)
 	return strncmp(str, prefix, strlen(prefix)) == 0;
 }
 
-size_t memweight(const void *ptr, size_t bytes);
-void memzero_explicit(void *s, size_t count);
+extern size_t memweight(const void *ptr, size_t bytes);
 
 /**
  * kbasename - return the last part of a pathname.

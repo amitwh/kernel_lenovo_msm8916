@@ -209,6 +209,7 @@ __v7_pj4b_setup:
 /* Auxiliary Debug Modes Control 1 Register */
 #define PJ4B_STATIC_BP (1 << 2) /* Enable Static BP */
 #define PJ4B_INTER_PARITY (1 << 8) /* Disable Internal Parity Handling */
+#define PJ4B_BCK_OFF_STREX (1 << 5) /* Enable the back off of STREX instr */
 #define PJ4B_CLEAN_LINE (1 << 16) /* Disable data transfer for clean line */
 
 /* Auxiliary Debug Modes Control 2 Register */
@@ -231,6 +232,7 @@ __v7_pj4b_setup:
 	/* Auxiliary Debug Modes Control 1 Register */
 	mrc	p15, 1,	r0, c15, c1, 1
 	orr     r0, r0, #PJ4B_CLEAN_LINE
+	orr     r0, r0, #PJ4B_BCK_OFF_STREX
 	orr     r0, r0, #PJ4B_INTER_PARITY
 	bic	r0, r0, #PJ4B_STATIC_BP
 	mcr	p15, 1,	r0, c15, c1, 1
@@ -504,10 +506,9 @@ __krait_proc_info:
 	/*
 	 * Some Krait processors don't indicate support for SDIV and UDIV
 	 * instructions in the ARM instruction set, even though they actually
-	 * do support them. They also don't indicate support for fused multiply
-	 * instructions even though they actually do support them.
+	 * do support them.
 	 */
-	__v7_proc __v7_setup, hwcaps = HWCAP_IDIV | HWCAP_VFPv4
+	__v7_proc __v7_setup, hwcaps = HWCAP_IDIV
 	.size	__krait_proc_info, . - __krait_proc_info
 
 	/*

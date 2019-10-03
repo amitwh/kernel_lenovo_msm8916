@@ -441,16 +441,11 @@ static void mac80211_hwsim_set_tsf(struct ieee80211_hw *hw,
 	struct mac80211_hwsim_data *data = hw->priv;
 	u64 now = mac80211_hwsim_get_tsf(hw, vif);
 	u32 bcn_int = data->beacon_int;
-	u64 delta = abs64(tsf - now);
+	s64 delta = tsf - now;
 
+	data->tsf_offset += delta;
 	/* adjust after beaconing with new timestamp at old TBTT */
-	if (tsf > now) {
-		data->tsf_offset += delta;
-		data->bcn_delta = do_div(delta, bcn_int);
-	} else {
-		data->tsf_offset -= delta;
-		data->bcn_delta = -do_div(delta, bcn_int);
-	}
+	data->bcn_delta = do_div(delta, bcn_int);
 }
 
 static void mac80211_hwsim_monitor_rx(struct ieee80211_hw *hw,
@@ -1936,7 +1931,6 @@ static int hwsim_tx_info_frame_received_nl(struct sk_buff *skb_2,
 	if (!info->attrs[HWSIM_ATTR_ADDR_TRANSMITTER] ||
 	   !info->attrs[HWSIM_ATTR_FLAGS] ||
 	   !info->attrs[HWSIM_ATTR_COOKIE] ||
-	   !info->attrs[HWSIM_ATTR_SIGNAL] ||
 	   !info->attrs[HWSIM_ATTR_TX_INFO])
 		goto out;
 

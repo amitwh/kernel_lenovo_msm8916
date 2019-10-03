@@ -734,12 +734,6 @@ ssize_t tcp_splice_read(struct socket *sock, loff_t *ppos,
 				ret = -EAGAIN;
 				break;
 			}
-			/* if __tcp_splice_read() got nothing while we have
-			 * an skb in receive queue, we do not want to loop.
-			 * This might happen with URG data.
-			 */
-			if (!skb_queue_empty(&sk->sk_receive_queue))
-				break;
 			sk_wait_data(sk, &timeo);
 			if (signal_pending(current)) {
 				ret = sock_intr_errno(timeo);
@@ -1082,7 +1076,7 @@ int tcp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (unlikely(tp->repair)) {
 		if (tp->repair_queue == TCP_RECV_QUEUE) {
 			copied = tcp_send_rcvq(sk, msg, size);
-			goto out_nopush;
+			goto out;
 		}
 
 		err = -EINVAL;
@@ -1255,7 +1249,6 @@ wait_for_memory:
 out:
 	if (copied)
 		tcp_push(sk, flags, mss_now, tp->nonagle);
-out_nopush:
 	release_sock(sk);
 
 	if (copied + copied_syn)
@@ -2336,15 +2329,9 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tcp_set_ca_state(sk, TCP_CA_Open);
 	tcp_clear_retrans(tp);
 	inet_csk_delack_init(sk);
-	/* Initialize rcv_mss to TCP_MIN_MSS to avoid division by 0
-	 * issue in __tcp_select_window()
-	 */
-	icsk->icsk_ack.rcv_mss = TCP_MIN_MSS;
 	tcp_init_send_head(sk);
 	memset(&tp->rx_opt, 0, sizeof(tp->rx_opt));
 	__sk_dst_reset(sk);
-	dst_release(sk->sk_rx_dst);
-	sk->sk_rx_dst = NULL;
 
 	WARN_ON(inet->inet_num && !icsk->icsk_bind_hash);
 
@@ -2784,7 +2771,7 @@ void tcp_get_info(const struct sock *sk, struct tcp_info *info)
 	if (sk->sk_socket) {
 		struct file *filep = sk->sk_socket->file;
 		if (filep)
-			info->tcpi_count = file_count(filep);
+			info->tcpi_count = atomic_read(&filep->f_count);
 	}
 }
 EXPORT_SYMBOL_GPL(tcp_get_info);
@@ -3399,43 +3386,6 @@ void tcp_done(struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(tcp_done);
 
-int tcp_abort(struct sock *sk, int err)
-{
-	if (sk->sk_state == TCP_TIME_WAIT) {
-		inet_twsk_put((struct inet_timewait_sock *)sk);
-		return -EOPNOTSUPP;
-	}
-
-	/* Don't race with userspace socket closes such as tcp_close. */
-	lock_sock(sk);
-
-	if (sk->sk_state == TCP_LISTEN) {
-		tcp_set_state(sk, TCP_CLOSE);
-		inet_csk_listen_stop(sk);
-	}
-
-	/* Don't race with BH socket closes such as inet_csk_listen_stop. */
-	local_bh_disable();
-	bh_lock_sock(sk);
-
-	if (!sock_flag(sk, SOCK_DEAD)) {
-		sk->sk_err = err;
-		/* This barrier is coupled with smp_rmb() in tcp_poll() */
-		smp_wmb();
-		sk->sk_error_report(sk);
-		if (tcp_need_reset(sk->sk_state))
-			tcp_send_active_reset(sk, GFP_ATOMIC);
-		tcp_done(sk);
-	}
-
-	bh_unlock_sock(sk);
-	local_bh_enable();
-	release_sock(sk);
-	sock_put(sk);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(tcp_abort);
-
 extern struct tcp_congestion_ops tcp_reno;
 
 static __initdata unsigned long thash_entries;
@@ -3470,7 +3420,6 @@ void __init tcp_init(void)
 	int max_rshare, max_wshare, cnt;
 	unsigned int i;
 
-	BUILD_BUG_ON(TCP_MIN_SND_MSS <= MAX_TCP_OPTION_SPACE);
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) > sizeof(skb->cb));
 
 	percpu_counter_init(&tcp_sockets_allocated, 0);
@@ -3588,7 +3537,7 @@ int tcp_nuke_addr(struct net *net, struct sockaddr *addr)
 		return -EAFNOSUPPORT;
 	}
 
-	for (bucket = 0; bucket <= tcp_hashinfo.ehash_mask; bucket++) {
+	for (bucket = 0; bucket < tcp_hashinfo.ehash_mask; bucket++) {
 		struct hlist_nulls_node *node;
 		struct sock *sk;
 		spinlock_t *lock = inet_ehash_lockp(&tcp_hashinfo, bucket);
@@ -3634,20 +3583,14 @@ restart:
 			sock_hold(sk);
 			spin_unlock_bh(lock);
 
-			lock_sock(sk);
 			local_bh_disable();
 			bh_lock_sock(sk);
+			sk->sk_err = ETIMEDOUT;
+			sk->sk_error_report(sk);
 
-			if (!sock_flag(sk, SOCK_DEAD)) {
-				smp_wmb();  /* be consistent with tcp_reset */
-				sk->sk_err = ETIMEDOUT;
-				sk->sk_error_report(sk);
-				tcp_done(sk);
-			}
-
+			tcp_done(sk);
 			bh_unlock_sock(sk);
 			local_bh_enable();
-			release_sock(sk);
 			sock_put(sk);
 
 			goto restart;

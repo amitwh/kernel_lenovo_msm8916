@@ -61,8 +61,6 @@ config FILE_LOCKING
           for filesystems like NFS and for the flock() system
           call. Disabling this option saves about 11k.
 
-source "fs/crypto/Kconfig"
-
 source "fs/notify/Kconfig"
 
 source "fs/quota/Kconfig"
@@ -95,7 +93,6 @@ menu "DOS/FAT/NT Filesystems"
 
 source "fs/fat/Kconfig"
 source "fs/ntfs/Kconfig"
-source "fs/sdfat/Kconfig"
 
 endmenu
 endif # BLOCK
@@ -191,7 +188,6 @@ if MISC_FILESYSTEMS
 source "fs/adfs/Kconfig"
 source "fs/affs/Kconfig"
 source "fs/ecryptfs/Kconfig"
-source "fs/sdcardfs/Kconfig"
 source "fs/hfs/Kconfig"
 source "fs/hfsplus/Kconfig"
 source "fs/befs/Kconfig"
@@ -277,14 +273,3 @@ source "fs/nls/Kconfig"
 source "fs/dlm/Kconfig"
 
 endmenu
-
-config SWITCH_NOATIME
-	bool "Config option to switch mnt flag default to noatime"
-	default y
-	---help---
-	  Say Y here to set the filesystem mountflags to noatime instead of
-          realtime. noatime has proven to work wise on SSD based FileSystems
-	  and has shown better latencies in the benchmarks. Which was/is/will
-	  always expected from a smartphone device.
-
-	  If unsure, Say Y here.

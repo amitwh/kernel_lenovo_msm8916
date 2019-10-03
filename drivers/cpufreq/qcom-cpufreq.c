@@ -1,9 +1,9 @@
-/* drivers/cpufreq/qcom-cpufreq.c
+/* arch/arm/mach-msm/cpufreq.c
  *
  * MSM architecture cpufreq driver
  *
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2007-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2007-2014, The Linux Foundation. All rights reserved.
  * Author: Mike A. Chan <mikechan@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -22,13 +22,13 @@
 #include <linux/cpufreq.h>
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
+#include <linux/sched.h>
+#include <linux/sched/rt.h>
 #include <linux/suspend.h>
 #include <linux/clk.h>
-#include <linux/clk/msm-clk-provider.h>
 #include <linux/err.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/delay.h>
 #include <trace/events/power.h>
 
 static DEFINE_MUTEX(l2bw_lock);
@@ -49,12 +49,26 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
 			unsigned int index)
 {
 	int ret = 0;
+	int saved_sched_policy = -EINVAL;
+	int saved_sched_rt_prio = -EINVAL;
 	struct cpufreq_freqs freqs;
+	struct sched_param param = { .sched_priority = MAX_RT_PRIO-1 };
 	unsigned long rate;
 
 	freqs.old = policy->cur;
 	freqs.new = new_freq;
 	freqs.cpu = policy->cpu;
+
+	/*
+	 * Put the caller into SCHED_FIFO priority to avoid cpu starvation
+	 * while increasing frequencies
+	 */
+
+	if (freqs.new > freqs.old && current->policy != SCHED_FIFO) {
+		saved_sched_policy = current->policy;
+		saved_sched_rt_prio = current->rt_priority;
+		sched_setscheduler_nocheck(current, SCHED_FIFO, &param);
+	}
 
 	cpufreq_notify_transition(policy, &freqs, CPUFREQ_PRECHANGE);
 
@@ -68,6 +82,11 @@ static int set_cpu_freq(struct cpufreq_policy *policy, unsigned int new_freq,
 		trace_cpu_frequency_switch_end(policy->cpu);
 	}
 
+	/* Restore priority after clock ramp-up */
+	if (freqs.new > freqs.old && saved_sched_policy >= 0) {
+		param.sched_priority = saved_sched_rt_prio;
+		sched_setscheduler_nocheck(current, saved_sched_policy, &param);
+	}
 	return ret;
 }
 
@@ -75,17 +94,11 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 				unsigned int target_freq,
 				unsigned int relation)
 {
-	int ret = 0;
+	int ret = -EFAULT;
 	int index;
 	struct cpufreq_frequency_table *table;
-	struct clk *c = cpu_clk[policy->cpu];
-	s64 delta_us;
 
 	mutex_lock(&per_cpu(cpufreq_suspend, policy->cpu).suspend_mutex);
-	mutex_lock(&c->update_lock);
-
-	if (target_freq == policy->cur)
-		goto done;
 
 	if (per_cpu(cpufreq_suspend, policy->cpu).device_suspended) {
 		pr_debug("cpufreq: cpu%d scheduling frequency change "
@@ -95,12 +108,6 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 	}
 
 	table = cpufreq_frequency_get_table(policy->cpu);
-	if (!table) {
-		pr_err("cpufreq: Failed to get frequency table for CPU%u\n",
-		       policy->cpu);
-		ret = -ENODEV;
-		goto done;
-	}
 	if (cpufreq_frequency_table_target(policy, table, target_freq, relation,
 			&index)) {
 		pr_err("cpufreq: invalid target_freq: %d\n", target_freq);
@@ -112,16 +119,9 @@ static int msm_cpufreq_target(struct cpufreq_policy *policy,
 		policy->cpu, target_freq, relation,
 		policy->min, policy->max, table[index].frequency);
 
-	/* The old rate needs time to settle before it can be changed again */
-	delta_us = ktime_us_delta(ktime_get_boottime(), c->last_update);
-	if (delta_us < 10000)
-		usleep_range(10000 - delta_us, 11000 - delta_us);
-	c->last_update = ktime_get_boottime();
-
 	ret = set_cpu_freq(policy, table[index].frequency,
 			   table[index].driver_data);
 done:
-	mutex_unlock(&c->update_lock);
 	mutex_unlock(&per_cpu(cpufreq_suspend, policy->cpu).suspend_mutex);
 	return ret;
 }
@@ -157,11 +157,8 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 		if (cpu_clk[cpu] == cpu_clk[policy->cpu])
 			cpumask_set_cpu(cpu, policy->cpus);
 
-	ret = cpufreq_table_validate_and_show(policy, table);
-	if (ret) {
+	if (cpufreq_frequency_table_cpuinfo(policy, table))
 		pr_err("cpufreq: failed to get policy min/max\n");
-		return ret;
-	}
 
 	cur_freq = clk_get_rate(cpu_clk[policy->cpu])/1000;
 
@@ -335,7 +332,7 @@ static struct cpufreq_driver msm_cpufreq_driver = {
 static struct cpufreq_frequency_table *cpufreq_parse_dt(struct device *dev,
 						char *tbl_name, int cpu)
 {
-	int ret, nf, i, j;
+	int ret, nf, i;
 	u32 *data;
 	struct cpufreq_frequency_table *ftbl;
 
@@ -359,7 +356,6 @@ static struct cpufreq_frequency_table *cpufreq_parse_dt(struct device *dev,
 	if (!ftbl)
 		return ERR_PTR(-ENOMEM);
 
-	j = 0;
 	for (i = 0; i < nf; i++) {
 		unsigned long f;
 
@@ -369,20 +365,29 @@ static struct cpufreq_frequency_table *cpufreq_parse_dt(struct device *dev,
 		f /= 1000;
 
 		/*
-		 * Don't repeat frequencies if they round up to the same clock
-		 * frequency.
+		 * Check if this is the last feasible frequency in the table.
 		 *
+		 * The table listing frequencies higher than what the HW can
+		 * support is not an error since the table might be shared
+		 * across CPUs in different speed bins. It's also not
+		 * sufficient to check if the rounded rate is lower than the
+		 * requested rate as it doesn't cover the following example:
+		 *
+		 * Table lists: 2.2 GHz and 2.5 GHz.
+		 * Rounded rate returns: 2.2 GHz and 2.3 GHz.
+		 *
+		 * In this case, we can CPUfreq to use 2.2 GHz and 2.3 GHz
+		 * instead of rejecting the 2.5 GHz table entry.
 		 */
-		if (j > 0 && f <= ftbl[j - 1].frequency)
-			continue;
+		if (i > 0 && f <= ftbl[i-1].frequency)
+			break;
 
-		ftbl[j].driver_data = j;
-		ftbl[j].frequency = f;
-		j++;
+		ftbl[i].driver_data = i;
+		ftbl[i].frequency = f;
 	}
 
-	ftbl[j].driver_data = j;
-	ftbl[j].frequency = CPUFREQ_TABLE_END;
+	ftbl[i].driver_data = i;
+	ftbl[i].frequency = CPUFREQ_TABLE_END;
 
 	devm_kfree(dev, data);
 
@@ -407,7 +412,6 @@ static int __init msm_cpufreq_probe(struct platform_device *pdev)
 		c = devm_clk_get(dev, clk_name);
 		if (IS_ERR(c))
 			return PTR_ERR(c);
-		c->flags |= CLKFLAG_NO_RATE_CACHE;
 		cpu_clk[cpu] = c;
 	}
 	hotplug_ready = true;

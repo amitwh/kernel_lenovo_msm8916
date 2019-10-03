@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,8 +21,6 @@
 
 #include <trace/events/power.h>
 
-static int touchboost = 0;
-
 static struct mutex managed_cpus_lock;
 
 /* Maximum number to clusters that this module will manage*/
@@ -35,7 +33,6 @@ struct cpu_hp {
 	cpumask_var_t offlined_cpus;
 };
 static struct cpu_hp **managed_clusters;
-static bool clusters_inited;
 
 /* Work to evaluate the onlining/offlining CPUs */
 struct delayed_work evaluate_hotplug_work;
@@ -49,29 +46,6 @@ static DEFINE_PER_CPU(struct cpu_status, cpu_stats);
 
 static unsigned int num_online_managed(struct cpumask *mask);
 static int init_cluster_control(void);
-
-static int set_touchboost(const char *buf, const struct kernel_param *kp)
-{
-	int val;
-
-	if (sscanf(buf, "%d\n", &val) != 1)
-		return -EINVAL;
-
-	touchboost = val;
-
-	return 0;
-}
-
-static int get_touchboost(char *buf, const struct kernel_param *kp)
-{
-	return snprintf(buf, PAGE_SIZE, "%d", touchboost);
-}
-
-static const struct kernel_param_ops param_ops_touchboost = {
-	.set = set_touchboost,
-	.get = get_touchboost,
-};
-device_param_cb(touchboost, &param_ops_touchboost, NULL, 0644);
 
 static int set_num_clusters(const char *buf, const struct kernel_param *kp)
 {
@@ -109,7 +83,7 @@ static int set_max_cpus(const char *buf, const struct kernel_param *kp)
 	const char *cp = buf;
 	int val;
 
-	if (!clusters_inited)
+	if (!num_clusters)
 		return -EINVAL;
 
 	while ((cp = strpbrk(cp + 1, ":")))
@@ -143,7 +117,7 @@ static int get_max_cpus(char *buf, const struct kernel_param *kp)
 {
 	int i, cnt = 0;
 
-	if (!clusters_inited)
+	if (!num_clusters)
 		return cnt;
 
 	for (i = 0; i < num_clusters; i++)
@@ -159,16 +133,14 @@ static const struct kernel_param_ops param_ops_max_cpus = {
 	.get = get_max_cpus,
 };
 
-#ifdef CONFIG_MSM_PERFORMANCE_HOTPLUG_ON
 device_param_cb(max_cpus, &param_ops_max_cpus, NULL, 0644);
-#endif
 
 static int set_managed_cpus(const char *buf, const struct kernel_param *kp)
 {
 	int i, ret;
 	struct cpumask tmp_mask;
 
-	if (!clusters_inited)
+	if (!num_clusters)
 		return -EINVAL;
 
 	ret = cpulist_parse(buf, &tmp_mask);
@@ -193,7 +165,7 @@ static int get_managed_cpus(char *buf, const struct kernel_param *kp)
 {
 	int i, cnt = 0;
 
-	if (!clusters_inited)
+	if (!num_clusters)
 		return cnt;
 
 	for (i = 0; i < num_clusters; i++) {
@@ -220,7 +192,7 @@ static int get_managed_online_cpus(char *buf, const struct kernel_param *kp)
 	struct cpumask tmp_mask;
 	struct cpu_hp *i_cpu_hp;
 
-	if (!clusters_inited)
+	if (!num_clusters)
 		return cnt;
 
 	for (i = 0; i < num_clusters; i++) {
@@ -244,11 +216,9 @@ static int get_managed_online_cpus(char *buf, const struct kernel_param *kp)
 static const struct kernel_param_ops param_ops_managed_online_cpus = {
 	.get = get_managed_online_cpus,
 };
-
-#ifdef CONFIG_MSM_PERFORMANCE_HOTPLUG_ON
 device_param_cb(managed_online_cpus, &param_ops_managed_online_cpus,
-							NULL, 0444);
-#endif
+								NULL, 0444);
+
 /*
  * Userspace sends cpu#:min_freq_value to vote for min_freq_value as the new
  * scaling_min. To withdraw its vote it needs to enter cpu#:0
@@ -262,10 +232,6 @@ static int set_cpu_min_freq(const char *buf, const struct kernel_param *kp)
 	struct cpufreq_policy policy;
 	cpumask_var_t limit_mask;
 	int ret;
-	const char *reset = "0:0 4:0";
-
-	if (touchboost == 0)
-		cp = reset;
 
 	while ((cp = strpbrk(cp + 1, " :")))
 		ntokens++;
@@ -274,11 +240,7 @@ static int set_cpu_min_freq(const char *buf, const struct kernel_param *kp)
 	if (!(ntokens % 2))
 		return -EINVAL;
 
-	if (touchboost == 0)
-		cp = reset;
-	else
-		cp = buf;
-
+	cp = buf;
 	cpumask_clear(limit_mask);
 	for (i = 0; i < ntokens; i += 2) {
 		if (sscanf(cp, "%u:%u", &cpu, &val) != 2)
@@ -288,7 +250,7 @@ static int set_cpu_min_freq(const char *buf, const struct kernel_param *kp)
 
 		i_cpu_stats = &per_cpu(cpu_stats, cpu);
 
-		// i_cpu_stats->min = val;
+		i_cpu_stats->min = val;
 		cpumask_set_cpu(cpu, limit_mask);
 
 		cp = strchr(cp, ' ');
@@ -371,7 +333,7 @@ static int set_cpu_max_freq(const char *buf, const struct kernel_param *kp)
 
 		i_cpu_stats = &per_cpu(cpu_stats, cpu);
 
-		// i_cpu_stats->max = val;
+		i_cpu_stats->max = val;
 		cpumask_set_cpu(cpu, limit_mask);
 
 		cp = strchr(cp, ' ');
@@ -462,9 +424,6 @@ static void __ref try_hotplug(struct cpu_hp *data)
 {
 	unsigned int i;
 
-	if (!clusters_inited)
-		return;
-
 	pr_debug("msm_perf: Trying hotplug...%d:%d\n",
 			num_online_managed(data->cpus),	num_online_cpus());
 
@@ -547,12 +506,7 @@ static int __ref msm_performance_cpu_callback(struct notifier_block *nfb,
 	unsigned int i;
 	struct cpu_hp *i_hp = NULL;
 
-	if (!clusters_inited)
-		return NOTIFY_OK;
-
 	for (i = 0; i < num_clusters; i++) {
-		if (managed_clusters[i]->cpus == NULL)
-			return NOTIFY_OK;
 		if (cpumask_test_cpu(cpu, managed_clusters[i]->cpus)) {
 			i_hp = managed_clusters[i];
 			break;
@@ -567,8 +521,6 @@ static int __ref msm_performance_cpu_callback(struct notifier_block *nfb,
 		 * Prevent onlining of a managed CPU if max_cpu criteria is
 		 * already satisfied
 		 */
-		if (i_hp->offlined_cpus == NULL)
-			return NOTIFY_OK;
 		if (i_hp->max_cpu_request <=
 					num_online_managed(i_hp->cpus)) {
 			pr_debug("msm_perf: Prevent CPU%d onlining\n", cpu);
@@ -578,8 +530,6 @@ static int __ref msm_performance_cpu_callback(struct notifier_block *nfb,
 		cpumask_clear_cpu(cpu, i_hp->offlined_cpus);
 
 	} else if (action == CPU_DEAD) {
-		if (i_hp->offlined_cpus == NULL)
-			return NOTIFY_OK;
 		if (cpumask_test_cpu(cpu, i_hp->offlined_cpus))
 			return NOTIFY_OK;
 		/*
@@ -628,7 +578,6 @@ static int init_cluster_control(void)
 	INIT_DELAYED_WORK(&evaluate_hotplug_work, check_cluster_status);
 	mutex_init(&managed_cpus_lock);
 
-	clusters_inited = true;
 	return 0;
 }
 

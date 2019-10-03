@@ -1353,8 +1353,6 @@ static void render_out_of_line_list(FILE *out)
 			render_opcode(out, "ASN1_OP_END_SET_OF%s,\n", act);
 			render_opcode(out, "_jump_target(%u),\n", entry);
 			break;
-		default:
-			break;
 		}
 		if (e->action)
 			render_opcode(out, "_action(ACT_%s),\n",
@@ -1457,8 +1455,7 @@ dont_render_tag:
 	case TYPE_REF:
 		render_element(out, e->type->type->element, tag);
 		if (e->action)
-			render_opcode(out, "ASN1_OP_%sACT,\n",
-				      skippable ? "MAYBE_" : "");
+			render_opcode(out, "ASN1_OP_ACT,\n");
 		break;
 
 	case SEQUENCE:

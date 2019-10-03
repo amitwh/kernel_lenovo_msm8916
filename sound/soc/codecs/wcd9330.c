@@ -403,6 +403,7 @@ static const DECLARE_TLV_DB_SCALE(digital_gain, 0, 1, 0);
 static const DECLARE_TLV_DB_SCALE(line_gain, 0, 7, 1);
 static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
 static struct snd_soc_dai_driver tomtom_dai[];
+static const DECLARE_TLV_DB_SCALE(aux_pga_gain, 0, 2, 0);
 
 /* Codec supports 2 IIR filters */
 enum {
@@ -1184,6 +1185,11 @@ static const char *const tomtom_anc_func_text[] = {"OFF", "ON"};
 static const struct soc_enum tomtom_anc_func_enum =
 		SOC_ENUM_SINGLE_EXT(2, tomtom_anc_func_text);
 
+static const char *const tabla_ear_pa_gain_text[] = {"POS_6_DB", "POS_2_DB"};
+static const struct soc_enum tabla_ear_pa_gain_enum[] = {
+		SOC_ENUM_SINGLE_EXT(2, tabla_ear_pa_gain_text),
+};
+
 /*cut of frequency for high pass filter*/
 static const char * const cf_text[] = {
 	"MIN_3DB_4Hz", "MIN_3DB_75Hz", "MIN_3DB_150Hz"
@@ -1325,13 +1331,6 @@ static int tomtom_mad_input_put(struct snd_kcontrol *kcontrol,
 
 	tomtom_mad_input = ucontrol->value.integer.value[0];
 	micb_4_int_reg = tomtom->resmgr.reg_addr->micb_4_int_rbias;
-
-	if (tomtom_mad_input >= ARRAY_SIZE(tomtom_conn_mad_text)) {
-		dev_err(codec->dev,
-			"%s: tomtom_mad_input = %d out of bounds\n",
-			__func__, tomtom_mad_input);
-		return -EINVAL;
-	}
 
 	pr_debug("%s: tomtom_mad_input = %s\n", __func__,
 			tomtom_conn_mad_text[tomtom_mad_input]);
@@ -3720,8 +3719,7 @@ static int tomtom_codec_enable_dec(struct snd_soc_dapm_widget *w,
 				CF_MIN_3DB_150HZ) &&
 			(tx_hpf_work[decimator - 1].tx_hpf_bypass != true)) {
 
-			queue_delayed_work(system_power_efficient_wq, 
-					&tx_hpf_work[decimator - 1].dwork,
+			schedule_delayed_work(&tx_hpf_work[decimator - 1].dwork,
 					msecs_to_jiffies(300));
 		}
 		/* apply the digital gain after the decimator is enabled*/
@@ -5364,7 +5362,7 @@ static int tomtom_set_channel_map(struct snd_soc_dai *dai,
 	struct tomtom_priv *tomtom = snd_soc_codec_get_drvdata(dai->codec);
 	struct wcd9xxx *core = dev_get_drvdata(dai->codec->dev->parent);
 	if (!tx_slot || !rx_slot) {
-		pr_err("%s: Invalid tx_slot=%pK, rx_slot=%pK\n",
+		pr_err("%s: Invalid tx_slot=%p, rx_slot=%p\n",
 			__func__, tx_slot, rx_slot);
 		return -EINVAL;
 	}
@@ -5400,7 +5398,7 @@ static int tomtom_get_channel_map(struct snd_soc_dai *dai,
 	case AIF2_PB:
 	case AIF3_PB:
 		if (!rx_slot || !rx_num) {
-			pr_err("%s: Invalid rx_slot %pK or rx_num %pK\n",
+			pr_err("%s: Invalid rx_slot %p or rx_num %p\n",
 				 __func__, rx_slot, rx_num);
 			return -EINVAL;
 		}
@@ -5419,7 +5417,7 @@ static int tomtom_get_channel_map(struct snd_soc_dai *dai,
 	case AIF4_VIFEED:
 	case AIF4_MAD_TX:
 		if (!tx_slot || !tx_num) {
-			pr_err("%s: Invalid tx_slot %pK or tx_num %pK\n",
+			pr_err("%s: Invalid tx_slot %p or tx_num %p\n",
 				 __func__, tx_slot, tx_num);
 			return -EINVAL;
 		}
@@ -8038,7 +8036,7 @@ static void tomtom_compute_impedance(struct wcd9xxx_mbhc *mbhc, s16 *l, s16 *r,
 	struct tomtom_priv *tomtom;
 
 	if (!mbhc) {
-		pr_err("%s: Invalid parameters mbhc = %pK\n",
+		pr_err("%s: Invalid parameters mbhc = %p\n",
 			__func__,  mbhc);
 		return;
 	}
@@ -8097,7 +8095,7 @@ static void tomtom_zdet_error_approx(struct wcd9xxx_mbhc *mbhc, uint32_t *zl,
 	const int shift = TOMTOM_ZDET_ERROR_APPROX_SHIFT;
 
 	if (!zl || !zr || !mbhc) {
-		pr_err("%s: Invalid parameters zl = %pK zr = %pK, mbhc = %pK\n",
+		pr_err("%s: Invalid parameters zl = %p zr = %p, mbhc = %p\n",
 			__func__, zl, zr, mbhc);
 		return;
 	}

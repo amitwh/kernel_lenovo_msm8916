@@ -508,20 +508,11 @@ void __init dma_contiguous_remap(void)
 		map.type = MT_MEMORY_DMA_READY;
 
 		/*
-		 * Clear previous low-memory mapping to ensure that the
-		 * TLB does not see any conflicting entries, then flush
-		 * the TLB of the old entries before creating new mappings.
-		 *
-		 * This ensures that any speculatively loaded TLB entries
-		 * (even though they may be rare) can not cause any problems,
-		 * and ensures that this code is architecturally compliant.
+		 * Clear previous low-memory mapping
 		 */
 		for (addr = __phys_to_virt(start); addr < __phys_to_virt(end);
 		     addr += PMD_SIZE)
 			pmd_clear(pmd_off_k(addr));
-
-		flush_tlb_kernel_range(__phys_to_virt(start),
-				       __phys_to_virt(end));
 
 		iotable_init(&map, 1);
 	}
@@ -693,10 +684,6 @@ static void *__alloc_from_contiguous(struct device *dev, size_t size,
 			 * clients trying to use the address incorrectly
 			 */
 			ptr = (void *)NO_KERNEL_MAPPING_DUMMY;
-
-			/* also flush out the stale highmem mappings */
-			kmap_flush_unused();
-			kmap_atomic_flush_unused();
 		} else {
 			ptr = __dma_alloc_remap(page, size, GFP_KERNEL, prot,
 						caller);
@@ -919,30 +906,12 @@ static void arm_coherent_dma_free(struct device *dev, size_t size, void *cpu_add
 	__arm_dma_free(dev, size, cpu_addr, handle, attrs, true);
 }
 
-/*
- * The whole dma_get_sgtable() idea is fundamentally unsafe - it seems
- * that the intention is to allow exporting memory allocated via the
- * coherent DMA APIs through the dma_buf API, which only accepts a
- * scattertable.  This presents a couple of problems:
- * 1. Not all memory allocated via the coherent DMA APIs is backed by
- *    a struct page
- * 2. Passing coherent DMA memory into the streaming APIs is not allowed
- *    as we will try to flush the memory through a different alias to that
- *    actually being used (and the flushes are redundant.)
- */
 int arm_dma_get_sgtable(struct device *dev, struct sg_table *sgt,
 		 void *cpu_addr, dma_addr_t handle, size_t size,
 		 struct dma_attrs *attrs)
 {
-	unsigned long pfn = dma_to_pfn(dev, handle);
-	struct page *page;
+	struct page *page = pfn_to_page(dma_to_pfn(dev, handle));
 	int ret;
-
-	/* If the PFN is not valid, we do not have a struct page */
-	if (!pfn_valid(pfn))
-		return -ENXIO;
-
-	page = pfn_to_page(pfn);
 
 	ret = sg_alloc_table(sgt, 1, GFP_KERNEL);
 	if (unlikely(ret))
@@ -1502,18 +1471,11 @@ static int arm_iommu_mmap_attrs(struct device *dev, struct vm_area_struct *vma,
 	unsigned long uaddr = vma->vm_start;
 	unsigned long usize = vma->vm_end - vma->vm_start;
 	struct page **pages = __iommu_get_pages(cpu_addr, attrs);
-	unsigned long nr_pages = PAGE_ALIGN(size) >> PAGE_SHIFT;
-	unsigned long off = vma->vm_pgoff;
 
 	vma->vm_page_prot = __get_dma_pgprot(attrs, vma->vm_page_prot);
 
 	if (!pages)
 		return -ENXIO;
-
-	if (off >= nr_pages || (usize >> PAGE_SHIFT) > nr_pages - off)
-		return -ENXIO;
-
-	pages += off;
 
 	do {
 		int ret = vm_insert_page(vma, uaddr, *pages++);

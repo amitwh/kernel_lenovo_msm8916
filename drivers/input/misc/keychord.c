@@ -232,13 +232,11 @@ static ssize_t keychord_write(struct file *file, const char __user *buffer,
 {
 	struct keychord_device *kdev = file->private_data;
 	struct input_keychord *keychords = 0;
-	struct input_keychord *keychord;
+	struct input_keychord *keychord, *next, *end;
 	int ret, i, key;
 	unsigned long flags;
-	size_t resid = count;
-	size_t key_bytes;
 
-	if (count < sizeof(struct input_keychord) || count > PAGE_SIZE)
+	if (count < sizeof(struct input_keychord))
 		return -EINVAL;
 	keychords = kzalloc(count, GFP_KERNEL);
 	if (!keychords)
@@ -267,29 +265,15 @@ static ssize_t keychord_write(struct file *file, const char __user *buffer,
 	kdev->head = kdev->tail = 0;
 
 	keychord = keychords;
+	end = (struct input_keychord *)((char *)keychord + count);
 
-	while (resid > 0) {
-		/* Is the entire keychord entry header present ? */
-		if (resid < sizeof(struct input_keychord)) {
-			pr_err("keychord: Insufficient bytes present for header %lu\n",
-			       resid);
-			goto err_unlock_return;
-		}
-		resid -= sizeof(struct input_keychord);
-		if (keychord->count <= 0) {
+	while (keychord < end) {
+		next = NEXT_KEYCHORD(keychord);
+		if (keychord->count <= 0 || next > end) {
 			pr_err("keychord: invalid keycode count %d\n",
 				keychord->count);
 			goto err_unlock_return;
 		}
-		key_bytes = keychord->count * sizeof(keychord->keycodes[0]);
-		/* Do we have all the expected keycodes ? */
-		if (resid < key_bytes) {
-			pr_err("keychord: Insufficient bytes present for keycount %lu\n",
-			       resid);
-			goto err_unlock_return;
-		}
-		resid -= key_bytes;
-
 		if (keychord->version != KEYCHORD_VERSION) {
 			pr_err("keychord: unsupported version %d\n",
 				keychord->version);
@@ -308,7 +292,7 @@ static ssize_t keychord_write(struct file *file, const char __user *buffer,
 		}
 
 		kdev->keychord_count++;
-		keychord = NEXT_KEYCHORD(keychord);
+		keychord = next;
 	}
 
 	kdev->keychords = keychords;
@@ -316,10 +300,8 @@ static ssize_t keychord_write(struct file *file, const char __user *buffer,
 
 	ret = input_register_handler(&kdev->input_handler);
 	if (ret) {
-		spin_lock_irqsave(&kdev->lock, flags);
-		kfree(kdev->keychords);
+		kfree(keychords);
 		kdev->keychords = 0;
-		spin_unlock_irqrestore(&kdev->lock, flags);
 		return ret;
 	}
 	kdev->registered = 1;
@@ -375,7 +357,6 @@ static int keychord_release(struct inode *inode, struct file *file)
 
 	if (kdev->registered)
 		input_unregister_handler(&kdev->input_handler);
-	kfree(kdev->keychords);
 	kfree(kdev);
 
 	return 0;

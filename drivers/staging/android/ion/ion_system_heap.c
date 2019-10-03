@@ -2,7 +2,7 @@
  * drivers/gpu/ion/ion_system_heap.c
  *
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -35,7 +35,7 @@ static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_NOWARN |
 static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_NOWARN);
 
 #ifndef CONFIG_ALLOC_BUFFERS_IN_4K_CHUNKS
-static const unsigned int orders[] = {4, 0};
+static const unsigned int orders[] = {9, 8, 4, 0};
 #else
 static const unsigned int orders[] = {0};
 #endif
@@ -44,7 +44,6 @@ static const int num_orders = ARRAY_SIZE(orders);
 static int order_to_index(unsigned int order)
 {
 	int i;
-
 	for (i = 0; i < num_orders; i++)
 		if (order == orders[i])
 			return i;
@@ -98,7 +97,6 @@ static void free_buffer_page(struct ion_system_heap *heap,
 
 	if (!(buffer->private_flags & ION_PRIV_FLAG_SHRINKER_FREE)) {
 		struct ion_page_pool *pool;
-
 		if (cached)
 			pool = heap->cached_pools[order_to_index(order)];
 		else
@@ -362,7 +360,6 @@ static int ion_system_heap_shrink(struct ion_heap *heap, gfp_t gfp_mask,
 
 	for (i = 0; i < num_orders; i++) {
 		struct ion_page_pool *pool = sys_heap->uncached_pools[i];
-
 		nr_total += ion_page_pool_shrink(pool, gfp_mask, nr_to_scan);
 
 		pool = sys_heap->cached_pools[i];
@@ -395,10 +392,8 @@ static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 	unsigned long cached_total = 0;
 
 	int i;
-
 	for (i = 0; i < num_orders; i++) {
 		struct ion_page_pool *pool = sys_heap->uncached_pools[i];
-
 		if (use_seq) {
 			seq_printf(s,
 				"%d order %u highmem pages in uncached pool = %lu total\n",
@@ -410,17 +405,17 @@ static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 				pool->low_count, pool->order,
 				(1 << pool->order) * PAGE_SIZE *
 					pool->low_count);
+		} else {
+			uncached_total += (1 << pool->order) * PAGE_SIZE *
+						pool->high_count;
+			uncached_total += (1 << pool->order) * PAGE_SIZE *
+						pool->low_count;
 		}
 
-		uncached_total += (1 << pool->order) * PAGE_SIZE *
-			pool->high_count;
-		uncached_total += (1 << pool->order) * PAGE_SIZE *
-			pool->low_count;
 	}
 
 	for (i = 0; i < num_orders; i++) {
 		struct ion_page_pool *pool = sys_heap->cached_pools[i];
-
 		if (use_seq) {
 			seq_printf(s,
 				"%d order %u highmem pages in cached pool = %lu total\n",
@@ -431,29 +426,17 @@ static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 				pool->low_count, pool->order,
 				(1 << pool->order) * PAGE_SIZE *
 					pool->low_count);
+		} else {
+			cached_total += (1 << pool->order) * PAGE_SIZE *
+						pool->high_count;
+			cached_total += (1 << pool->order) * PAGE_SIZE *
+						pool->low_count;
 		}
-
-		cached_total += (1 << pool->order) * PAGE_SIZE *
-			pool->high_count;
-		cached_total += (1 << pool->order) * PAGE_SIZE *
-			pool->low_count;
 	}
 
-	if (use_seq) {
-		seq_puts(s, "--------------------------------------------\n");
-		seq_printf(s, "uncached pool = %lu cached pool = %lu\n",
+	if (!use_seq)
+		pr_info("uncached pool total = %lu cached pool total %lu\n",
 				uncached_total, cached_total);
-		seq_printf(s, "pool total (uncached + cached) = %lu\n",
-				uncached_total + cached_total);
-		seq_puts(s, "--------------------------------------------\n");
-	} else {
-		pr_info("-------------------------------------------------\n");
-		pr_info("uncached pool = %lu cached pool = %lu\n",
-				uncached_total, cached_total);
-		pr_info("pool total (uncached + cached) = %lu\n",
-				uncached_total + cached_total);
-		pr_info("-------------------------------------------------\n");
-	}
 
 	return 0;
 }
@@ -463,10 +446,8 @@ static void ion_system_heap_destroy_pools(struct ion_page_pool **pools)
 {
 	int i;
 	for (i = 0; i < num_orders; i++)
-		if (pools[i]) {
+		if (pools[i])
 			ion_page_pool_destroy(pools[i]);
-			pools[i] = NULL;
-		}
 }
 
 /**

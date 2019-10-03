@@ -780,11 +780,6 @@ int dccp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (skb == NULL)
 		goto out_release;
 
-	if (sk->sk_state == DCCP_CLOSED) {
-		rc = -ENOTCONN;
-		goto out_discard;
-	}
-
 	skb_reserve(skb, sk->sk_prot->max_header);
 	rc = memcpy_fromiovec(skb_put(skb, len), msg->msg_iov, len);
 	if (rc != 0)
@@ -1016,10 +1011,6 @@ void dccp_close(struct sock *sk, long timeout)
 		data_was_unread += skb->len;
 		__kfree_skb(skb);
 	}
-
-	/* If socket has been already reset kill it. */
-	if (sk->sk_state == DCCP_CLOSED)
-		goto adjudge_to_death;
 
 	if (data_was_unread) {
 		/* Unread data was tossed, send an appropriate Reset Code */

@@ -203,7 +203,6 @@ extern rwlock_t ip6_ra_lock;
  */
 
 struct ipv6_txoptions {
-	atomic_t		refcnt;
 	/* Length of this structure */
 	int			tot_len;
 
@@ -216,7 +215,7 @@ struct ipv6_txoptions {
 	struct ipv6_opt_hdr	*dst0opt;
 	struct ipv6_rt_hdr	*srcrt;	/* Routing Header */
 	struct ipv6_opt_hdr	*dst1opt;
-	struct rcu_head		rcu;
+
 	/* Option buffer, as read by IPV6_PKTOPTIONS, starts here. */
 };
 
@@ -255,23 +254,6 @@ extern void			fl6_free_socklist(struct sock *sk);
 extern int			ipv6_flowlabel_opt(struct sock *sk, char __user *optval, int optlen);
 extern int			ip6_flowlabel_init(void);
 extern void			ip6_flowlabel_cleanup(void);
-static inline struct ipv6_txoptions *txopt_get(const struct ipv6_pinfo *np)
-{
-	struct ipv6_txoptions *opt;
-
-	rcu_read_lock();
-	opt = rcu_dereference(np->opt);
-	if (opt && !atomic_inc_not_zero(&opt->refcnt))
-		opt = NULL;
-	rcu_read_unlock();
-	return opt;
-}
-
-static inline void txopt_put(struct ipv6_txoptions *opt)
-{
-	if (opt && atomic_dec_and_test(&opt->refcnt))
-		kfree_rcu(opt, rcu);
-}
 
 static inline void fl6_sock_release(struct ip6_flowlabel *fl)
 {
@@ -322,8 +304,8 @@ static inline int ip6_frag_mem(struct net *net)
 }
 #endif
 
-#define IPV6_FRAG_HIGH_THRESH	(256 * 1024)	/* 262144 */
-#define IPV6_FRAG_LOW_THRESH	(192 * 1024)	/* 196608 */
+#define IPV6_FRAG_HIGH_THRESH	(4 * 1024*1024)	/* 4194304 */
+#define IPV6_FRAG_LOW_THRESH	(3 * 1024*1024)	/* 3145728 */
 #define IPV6_FRAG_TIMEOUT	(60 * HZ)	/* 60 seconds */
 
 extern int __ipv6_addr_type(const struct in6_addr *addr);
@@ -505,7 +487,6 @@ struct ip6_create_arg {
 	u32 user;
 	const struct in6_addr *src;
 	const struct in6_addr *dst;
-	int iif;
 	u8 ecn;
 };
 
@@ -558,19 +539,14 @@ static inline u32 ipv6_addr_hash(const struct in6_addr *a)
 }
 
 /* more secured version of ipv6_addr_hash() */
-static inline u32 __ipv6_addr_jhash(const struct in6_addr *a, const u32 initval)
+static inline u32 ipv6_addr_jhash(const struct in6_addr *a)
 {
 	u32 v = (__force u32)a->s6_addr32[0] ^ (__force u32)a->s6_addr32[1];
 
 	return jhash_3words(v,
 			    (__force u32)a->s6_addr32[2],
 			    (__force u32)a->s6_addr32[3],
-			    initval);
-}
-
-static inline u32 ipv6_addr_jhash(const struct in6_addr *a)
-{
-	return __ipv6_addr_jhash(a, ipv6_hash_secret);
+			    ipv6_hash_secret);
 }
 
 static inline bool ipv6_addr_loopback(const struct in6_addr *a)
@@ -681,6 +657,8 @@ static inline int ipv6_addr_diff(const struct in6_addr *a1, const struct in6_add
 {
 	return __ipv6_addr_diff(a1, a2, sizeof(struct in6_addr));
 }
+
+extern void ipv6_select_ident(struct frag_hdr *fhdr, struct rt6_info *rt);
 
 /*
  *	Header manipulation
@@ -849,7 +827,6 @@ extern int inet6_hash_connect(struct inet_timewait_death_row *death_row,
  */
 extern const struct proto_ops inet6_stream_ops;
 extern const struct proto_ops inet6_dgram_ops;
-extern const struct proto_ops inet6_sockraw_ops;
 
 struct group_source_req;
 struct group_filter;

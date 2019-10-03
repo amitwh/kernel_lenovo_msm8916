@@ -1204,14 +1204,6 @@ static int taiko_mad_input_put(struct snd_kcontrol *kcontrol,
 
 	taiko_mad_input = ucontrol->value.integer.value[0];
 
-	if (taiko_mad_input >= ARRAY_SIZE(taiko_conn_mad_text)) {
-		dev_err(codec->dev,
-			"%s: taiko_mad_input = %d out of bounds\n",
-			__func__, taiko_mad_input);
-		return -EINVAL;
-	}
-
-
 	micb_4_int_reg = taiko->resmgr.reg_addr->micb_4_int_rbias;
 	pr_debug("%s: taiko_mad_input = %s\n", __func__,
 			taiko_conn_mad_text[taiko_mad_input]);
@@ -3268,8 +3260,7 @@ static int taiko_codec_enable_dec(struct snd_soc_dapm_widget *w,
 				CF_MIN_3DB_150HZ) &&
 			(tx_hpf_work[decimator - 1].tx_hpf_bypass != true)) {
 
-			queue_delayed_work(system_power_efficient_wq, 
-					&tx_hpf_work[decimator - 1].dwork,
+			schedule_delayed_work(&tx_hpf_work[decimator - 1].dwork,
 					msecs_to_jiffies(300));
 		}
 		/* apply the digital gain after the decimator is enabled*/
@@ -4725,7 +4716,7 @@ static int taiko_set_channel_map(struct snd_soc_dai *dai,
 	struct taiko_priv *taiko = snd_soc_codec_get_drvdata(dai->codec);
 	struct wcd9xxx *core = dev_get_drvdata(dai->codec->dev->parent);
 	if (!tx_slot || !rx_slot) {
-		pr_err("%s: Invalid tx_slot=%pK, rx_slot=%pK\n", __func__,
+		pr_err("%s: Invalid tx_slot=%p, rx_slot=%p\n", __func__,
 			tx_slot, rx_slot);
 		return -EINVAL;
 	}
