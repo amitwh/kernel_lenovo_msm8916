@@ -52,6 +52,10 @@ static int get_cal_path(int path_type);
 
 static struct mutex routing_lock;
 
+#ifdef CONFIG_MACH_SPIRIT
+static int voice_use_count = 0;
+#endif
+
 static struct cal_type_data *cal_data;
 
 static int fm_switch_enable;
@@ -85,7 +89,7 @@ enum {
 #define QUAT_MI2S_TX_TEXT "QUAT_MI2S_TX"
 #define ADM_LSM_TX_TEXT "ADM_LSM_TX"
 #define LSM_FUNCTION_TEXT "LSM Function"
-static char * const lsm_port_text[] = {
+static const char * const lsm_port_text[] = {
 	"None",
 	SLIMBUS_0_TX_TEXT, SLIMBUS_1_TX_TEXT, SLIMBUS_2_TX_TEXT,
 	SLIMBUS_3_TX_TEXT, SLIMBUS_4_TX_TEXT, SLIMBUS_5_TX_TEXT,
@@ -1327,6 +1331,9 @@ static int msm_routing_put_listen_mixer(struct snd_kcontrol *kcontrol,
 	return 1;
 }
 
+#ifdef CONFIG_MACH_SPIRIT
+extern void smb1360_set_call_current(bool active);
+#endif
 static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 {
 	u32 session_id = 0;
@@ -1354,6 +1361,24 @@ static void msm_pcm_routing_process_voice(u16 reg, u16 val, int set)
 		__func__, val, session_id);
 
 	mutex_lock(&routing_lock);
+
+#ifdef CONFIG_MACH_SPIRIT
+	if (set) {
+		if (voice_use_count == 0) {
+			pr_debug("%s: enable charging limit\n",
+					__func__);
+			smb1360_set_call_current(true);
+		}
+		voice_use_count++;
+	} else {
+		voice_use_count--;
+		if (voice_use_count == 0) {
+			pr_debug("%s: disable charging limit\n",
+					__func__);
+			smb1360_set_call_current(false);
+		}
+	}
+#endif
 
 	if (set)
 		set_bit(val, &msm_bedais[reg].fe_sessions);
@@ -1909,7 +1934,7 @@ static int msm_routing_ec_ref_rx_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static char *const ec_ref_rx[] = { "None", "SLIM_RX", "I2S_RX",
+static const char *const ec_ref_rx[] = { "None", "SLIM_RX", "I2S_RX",
 	"PRI_MI2S_TX", "SEC_MI2S_TX",
 	"TERT_MI2S_TX", "QUAT_MI2S_TX", "SEC_I2S_RX", "PROXY_RX"};
 static const struct soc_enum msm_route_ec_ref_rx_enum[] = {
@@ -5339,11 +5364,11 @@ static const char * const slim0_rx_vi_fb_tx_rch_mux_text[] = {
 	"ZERO", "SLIM4_TX"
 };
 
-static const int slim0_rx_vi_fb_tx_lch_value[] = {
+static const int const slim0_rx_vi_fb_tx_lch_value[] = {
 	MSM_BACKEND_DAI_MAX, MSM_BACKEND_DAI_SLIMBUS_4_TX
 };
 
-static const int slim0_rx_vi_fb_tx_rch_value[] = {
+static const int const slim0_rx_vi_fb_tx_rch_value[] = {
 	MSM_BACKEND_DAI_MAX, MSM_BACKEND_DAI_SLIMBUS_4_TX
 };
 
